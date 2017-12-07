@@ -113,7 +113,7 @@
       '<!@(<(list_sources_command) <(qt_moc_list_sources_arg))',
     ],
     'sources!': [
-      '<!@(<(list_sources_command) <(qt_moc_list_sources_arg) --exclude_for <(build_os))',
+      '<!@(<(list_sources_command) <(qt_moc_list_sources_arg) --exclude_for linux)',
     ],
     'conditions': [
       [ '"<(official_build_target)" != ""', {
