@@ -26,7 +26,7 @@ Copyright (c) 2014-2017 John Preston, https://desktop.telegram.org
 
 #if defined(__APPLE__)
 #define OS_MAC 1
-#elif defined(__linux__) // __APPLE__
+#elif defined(__linux__) || defined(__FreeBSD__)// __APPLE__
 #define OS_LINUX 1
 #elif defined(_WIN32) // __APPLE__ || __linux__
 #define OS_WIN 1

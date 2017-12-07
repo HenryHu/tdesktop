@@ -270,7 +270,7 @@ inline const char *cApiDeviceModel() {
 	return "PC";
 #elif defined Q_OS_MAC
 	return "Mac";
-#elif defined Q_OS_LINUX
+#elif defined Q_OS_LINUX || defined Q_OS_FREEBSD
 	return "PC";
 #endif
 }
@@ -279,7 +279,7 @@ inline const char *cApiSystemVersion() {
 	return "Windows";
 #elif defined Q_OS_MAC
 	return "OS X";
-#elif defined Q_OS_LINUX
+#elif defined Q_OS_LINUX || defined Q_OS_FREEBSD
 	return "Linux";
 #endif
 }
