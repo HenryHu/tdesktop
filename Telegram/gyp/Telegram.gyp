@@ -80,12 +80,10 @@
       'codegen.gyp:codegen_numbers',
       'codegen.gyp:codegen_style',
       'tests/tests.gyp:tests',
-      'utils.gyp:Updater',
       '../ThirdParty/libtgvoip/libtgvoip.gyp:libtgvoip',
     ],
 
     'defines': [
-      'AL_LIBTYPE_STATIC',
       'AL_ALEXT_PROTOTYPES',
       'TGVOIP_USE_CXX11_LIB',
       '<!@(python -c "for s in \'<(build_defines)\'.split(\',\'): print(s)")',
@@ -94,14 +92,7 @@
     'include_dirs': [
       '<(src_loc)',
       '<(SHARED_INTERMEDIATE_DIR)',
-      '<(libs_loc)/breakpad/src',
-      '<(libs_loc)/lzma/C',
-      '<(libs_loc)/libexif-0.6.20',
-      '<(libs_loc)/zlib-1.2.8',
-      '<(libs_loc)/ffmpeg',
-      '<(libs_loc)/openal-soft/include',
-      '<(libs_loc)/opus/include',
-      '<(minizip_loc)',
+      '/usr/local/include/minizip',
       '<(sp_media_key_tap_loc)',
       '<(emoji_suggestions_loc)',
       '<(submodules_loc)/GSL/include',

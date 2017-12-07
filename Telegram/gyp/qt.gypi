@@ -27,25 +27,21 @@
               [ 'build_macold', {
                 'qt_version%': '5.3.2',
               }, {
-                'qt_version%': '5.6.2',
+                'qt_version%': '5.7.1',
               }]
             ],
           },
           'qt_libs': [
-            'qwebp',
-            'Qt5PrintSupport',
-            'Qt5PlatformSupport',
             'Qt5Network',
             'Qt5Widgets',
             'Qt5Gui',
-            'qtharfbuzzng',
           ],
           'qt_version%': '<(qt_version)',
           'conditions': [
             [ 'build_macold', {
               'linux_path_qt%': '/usr/local/macold/Qt-<(qt_version)',
             }, {
-              'linux_path_qt%': '/usr/local/tdesktop/Qt-<(qt_version)',
+              'linux_path_qt%': '/usr/lib/qt',
             }]
           ]
         },
@@ -85,32 +81,12 @@
             ],
           }],
           [ 'build_linux', {
-            'qt_lib_prefix': 'lib',
-            'qt_lib_debug_postfix': '.a',
-            'qt_lib_release_postfix': '.a',
+            'qt_lib_prefix': '',
+            'qt_lib_debug_postfix': '',
+            'qt_lib_release_postfix': '',
             'qt_libs': [
-              'qxcb',
-              'Qt5XcbQpa',
-              'qconnmanbearer',
-              'qgenericbearer',
-              'qnmbearer',
               '<@(qt_libs)',
-              'Qt5DBus',
               'Qt5Core',
-              'qtpcre',
-              'Xi',
-              'Xext',
-              'Xfixes',
-              'SM',
-              'ICE',
-              'fontconfig',
-              'expat',
-              'freetype',
-              'z',
-              'xcb-shm',
-              'xcb-xfixes',
-              'xcb-render',
-              'xcb-static',
             ],
           }],
         ],
@@ -140,11 +116,6 @@
     # '<!@(python <(DEPTH)/list_sources.py [sources] <(qt_moc_list_sources_arg))'
     # where [sources] contains all your source files
     'qt_moc_list_sources_arg': '--moc-prefix SHARED_INTERMEDIATE_DIR/<(_target_name)/moc/moc_',
-
-    'linux_path_xkbcommon%': '/usr/local',
-    'linux_lib_ssl%': '/usr/local/ssl/lib/libssl.a',
-    'linux_lib_crypto%': '/usr/local/ssl/lib/libcrypto.a',
-    'linux_lib_icu%': '/usr/lib/libicutu.a /usr/lib/libicui18n.a /usr/lib/libicuuc.a /usr/lib/libicudata.a',
   },
 
   'configurations': {
@@ -193,15 +164,17 @@
   },
 
   'include_dirs': [
-    '<(qt_loc)/include',
-    '<(qt_loc)/include/QtCore',
-    '<(qt_loc)/include/QtGui',
-    '<(qt_loc)/include/QtCore/<(qt_version)',
-    '<(qt_loc)/include/QtGui/<(qt_version)',
-    '<(qt_loc)/include/QtCore/<(qt_version)/QtCore',
-    '<(qt_loc)/include/QtGui/<(qt_version)/QtGui',
+    '/usr/local/include/qt5',
+    '/usr/local/include/qt5/QtCore',
+    '/usr/local/include/qt5/QtGui',
+    '/usr/local/include/qt5/QtCore/<(qt_version)',
+    '/usr/local/include/qt5/QtGui/<(qt_version)',
+    '/usr/local/include/qt5/QtCore/<(qt_version)/QtCore',
+    '/usr/local/include/qt5/QtGui/<(qt_version)/QtGui',
   ],
   'library_dirs': [
+    '/usr/local/lib',
+    '/usr/local/lib/qt5/',
     '<(qt_loc)/lib',
     '<(qt_loc)/plugins',
     '<(qt_loc)/plugins/bearer',
@@ -220,25 +193,20 @@
         '<(qt_loc)/plugins/platforminputcontexts',
       ],
       'libraries': [
-        '<(linux_path_xkbcommon)/lib/libxkbcommon.a',
         '<@(qt_libs_release)',
-        '<(linux_lib_ssl)',
-        '<(linux_lib_crypto)',
-        '<!@(python -c "for s in \'<(linux_lib_icu)\'.split(\' \'): print(s)")',
+        '-lcrypto',
         '-lxcb',
         '-lX11',
         '-lX11-xcb',
         '-ldbus-1',
-        '-ldl',
         '-lgthread-2.0',
         '-lglib-2.0',
         '-lpthread',
       ],
       'include_dirs': [
-        '<(qt_loc)/mkspecs/linux-g++',
+        '/usr/local/lib/qt5/mkspecs/freebsd-clang',
       ],
       'ldflags': [
-        '-static-libstdc++',
         '-pthread',
         '-g',
         '-rdynamic',
@@ -260,7 +228,7 @@
       '<(SHARED_INTERMEDIATE_DIR)/<(_target_name)/moc/moc_<(RULE_INPUT_ROOT).cpp',
     ],
     'action': [
-      '<(qt_loc)/bin/moc<(exe_ext)',
+      '/usr/local/bin/moc',
 
       # Silence "Note: No relevant classes found. No output generated."
       '--no-notes',
