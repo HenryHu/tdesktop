@@ -74,7 +74,7 @@
 #      '<!(pkg-config 2> /dev/null --libs <@(pkgconfig_libs))',
     ],
     'cflags_cc': [
-      '<!(pkg-config 2> /dev/null --cflags appindicator-0.1)',
+#      '<!(pkg-config 2> /dev/null --cflags appindicator-0.1)',
       '<!(pkg-config 2> /dev/null --cflags gtk+-2.0)',
       '<!(pkg-config 2> /dev/null --cflags glib-2.0)',
       '<!(pkg-config 2> /dev/null --cflags dee-1.0)',
