@@ -36,7 +36,6 @@
       'linux_path_opus_include%': '/usr/local/include/opus',
     },
     'include_dirs': [
-      '/usr/include/openssl-1.0',
       '/usr/local/include',
       '<(linux_path_ffmpeg)/include',
       '<(linux_path_openal)/include',
@@ -44,7 +43,6 @@
       '<(linux_path_opus_include)',
     ],
     'library_dirs': [
-      '/usr/lib/openssl-1.0',
       '/usr/local/lib',
       '<(linux_path_ffmpeg)/lib',
       '<(linux_path_openal)/lib',
