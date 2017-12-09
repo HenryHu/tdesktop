@@ -279,8 +279,10 @@ inline const char *cApiSystemVersion() {
 	return "Windows";
 #elif defined Q_OS_MAC
 	return "OS X";
-#elif defined Q_OS_LINUX || defined Q_OS_FREEBSD
+#elif defined Q_OS_LINUX
 	return "Linux";
+#elif defined Q_OS_FREEBSD
+	return "FreeBSD";
 #endif
 }
 
