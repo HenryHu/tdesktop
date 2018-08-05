@@ -51,7 +51,7 @@
         'pt-BR',
       ],
       'build_defines%': '',
-      'list_sources_command': 'python <(DEPTH)/list_sources.py --input <(DEPTH)/telegram_sources.txt --replace src_loc=<(src_loc)',
+      'list_sources_command': '%%PYTHON_CMD%% <(DEPTH)/list_sources.py --input <(DEPTH)/telegram_sources.txt --replace src_loc=<(src_loc)',
       'pch_source': '<(src_loc)/stdafx.cpp',
       'pch_header': '<(src_loc)/stdafx.h',
     },
@@ -74,31 +74,21 @@
       'codegen.gyp:codegen_numbers',
       'codegen.gyp:codegen_style',
       'tests/tests.gyp:tests',
-      'utils.gyp:Updater',
       '../ThirdParty/libtgvoip/libtgvoip.gyp:libtgvoip',
       'crl.gyp:crl',
       'lib_export.gyp:lib_export',
     ],
 
     'defines': [
-      'AL_LIBTYPE_STATIC',
       'AL_ALEXT_PROTOTYPES',
       'TGVOIP_USE_CXX11_LIB',
-      '<!@(python -c "for s in \'<(build_defines)\'.split(\',\'): print(s)")',
+      '<!@(%%PYTHON_CMD%% -c "for s in \'<(build_defines)\'.split(\',\'): print(s)")',
     ],
 
     'include_dirs': [
       '<(src_loc)',
       '<(SHARED_INTERMEDIATE_DIR)',
-      '<(libs_loc)/breakpad/src',
-      '<(libs_loc)/lzma/C',
-      '<(libs_loc)/zlib',
-      '<(libs_loc)/ffmpeg',
-      '<(libs_loc)/openal-soft/include',
-      '<(libs_loc)/opus/include',
-      '<(libs_loc)/range-v3/include',
-      '<(minizip_loc)',
-      '<(sp_media_key_tap_loc)',
+      '%%LOCALBASE%%/include/minizip',
       '<(emoji_suggestions_loc)',
       '<(submodules_loc)/GSL/include',
       '<(submodules_loc)/variant/include',
@@ -115,7 +105,7 @@
       '<(res_loc)/export_html/images/back@2x.png',
     ],
     'sources!': [
-      '<!@(<(list_sources_command) <(qt_moc_list_sources_arg) --exclude_for <(build_os))',
+      '<!@(<(list_sources_command) <(qt_moc_list_sources_arg) --exclude_for linux)',
     ],
     'conditions': [
       [ '"<(official_build_target)" != ""', {
