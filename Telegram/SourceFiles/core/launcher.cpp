@@ -148,7 +148,6 @@ void Launcher::prepareSettings() {
 		gPlatformString = qsl("Linux32bit");
 	break;
 	case dbipFreeBSD:
-		gUpdateURL = QUrl(qsl(""));
 		gPlatformString = qsl("FreeBSD");
 	break;
 	}
