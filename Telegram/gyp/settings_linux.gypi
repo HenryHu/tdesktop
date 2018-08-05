@@ -71,9 +71,6 @@
         '-Wno-register',
       ],
       'make_global_settings': [
-        ['AR', 'ar'],
-        ['RANLIB', 'ranlib'],
-        ['NM', 'nm'],
       ],
       'configurations': {
         'Debug': {
