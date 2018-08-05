@@ -71,9 +71,9 @@
         '-Wno-register',
       ],
       'make_global_settings': [
-        ['AR', '/usr/bin/gcc-ar'],
-        ['RANLIB', '/usr/bin/gcc-ranlib'],
-        ['NM', '/usr/bin/gcc-nm'],
+        ['AR', 'ar'],
+        ['RANLIB', 'ranlib'],
+        ['NM', 'nm'],
       ],
       'configurations': {
         'Debug': {
