@@ -57,7 +57,7 @@ public:
 	}
 
 	void reActivateWindow() {
-#if defined Q_OS_LINUX32 || defined Q_OS_LINUX64
+#if defined Q_OS_LINUX32 || defined Q_OS_LINUX64 || defined Q_OS_FREEBSD
 		onReActivate();
 		QTimer::singleShot(200, this, SLOT(onReActivate()));
 #endif // Q_OS_LINUX32 || Q_OS_LINUX64
