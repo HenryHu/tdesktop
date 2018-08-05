@@ -17,7 +17,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwidget.h"
 #include "history/history_location_manager.h"
 #include "storage/localstorage.h"
-#include "passcodewidget.h"
 #include "core/crash_reports.h"
 
 #include <Shobjidl.h>
@@ -333,6 +332,10 @@ QString SystemCountry() {
 	return QString();
 }
 
+bool IsApplicationActive() {
+	return static_cast<QApplication*>(QApplication::instance())->activeWindow() != nullptr;
+}
+
 QString CurrentExecutablePath(int argc, char *argv[]) {
 	WCHAR result[MAX_PATH + 1] = { 0 };
 	auto count = GetModuleFileName(nullptr, result, MAX_PATH + 1);
@@ -576,6 +579,8 @@ namespace {
 	}
 }
 
+namespace Platform {
+
 void RegisterCustomScheme() {
 	if (cExeName().isEmpty()) {
 		return;
@@ -621,8 +626,10 @@ void RegisterCustomScheme() {
 #endif // !TDESKTOP_DISABLE_REGISTER_CUSTOM_SCHEME
 }
 
+} // namespace Platform
+
 void psNewVersion() {
-	RegisterCustomScheme();
+	Platform::RegisterCustomScheme();
 	if (Local::oldSettingsVersion() < 8051) {
 		AppUserModelId::checkPinned();
 	}

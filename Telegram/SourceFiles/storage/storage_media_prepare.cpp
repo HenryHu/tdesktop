@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "platform/platform_file_utilities.h"
 #include "storage/localimageloader.h"
+#include "core/mime_type.h"
 
 namespace Storage {
 namespace {
@@ -40,6 +41,16 @@ bool ValidVideoForAlbum(const FileMediaInformation::Video &video) {
 	return ValidateThumbDimensions(width, height);
 }
 
+QSize PrepareShownDimensions(const QImage &preview) {
+	constexpr auto kMaxWidth = 1280;
+	constexpr auto kMaxHeight = 1280;
+
+	const auto result = preview.size();
+	return (result.width() > kMaxWidth || result.height() > kMaxHeight)
+		? result.scaled(kMaxWidth, kMaxHeight, Qt::KeepAspectRatio)
+		: result;
+}
+
 bool PrepareAlbumMediaIsWaiting(
 		QSemaphore &semaphore,
 		PreparedFile &file,
@@ -48,13 +59,13 @@ bool PrepareAlbumMediaIsWaiting(
 	crl::async([=, &semaphore, &file] {
 		const auto guard = gsl::finally([&] { semaphore.release(); });
 		if (!file.path.isEmpty()) {
-			file.mime = mimeTypeForFile(QFileInfo(file.path)).name();
+			file.mime = Core::MimeTypeForFile(QFileInfo(file.path)).name();
 			file.information = FileLoadTask::ReadMediaInformation(
 				file.path,
 				QByteArray(),
 				file.mime);
 		} else if (!file.content.isEmpty()) {
-			file.mime = mimeTypeForData(file.content).name();
+			file.mime = Core::MimeTypeForData(file.content).name();
 			file.information = FileLoadTask::ReadMediaInformation(
 				QString(),
 				file.content,
@@ -68,6 +79,7 @@ bool PrepareAlbumMediaIsWaiting(
 		if (const auto image = base::get_if<Image>(
 				&file.information->media)) {
 			if (ValidPhotoForAlbum(*image)) {
+				file.shownDimensions = PrepareShownDimensions(image->data);
 				file.preview = Images::prepareOpaque(image->data.scaledToWidth(
 					std::min(previewWidth, convertScale(image->data.width()))
 						* cIntRetinaFactor(),
@@ -79,6 +91,7 @@ bool PrepareAlbumMediaIsWaiting(
 				&file.information->media)) {
 			if (ValidVideoForAlbum(*video)) {
 				auto blurred = Images::prepareBlur(Images::prepareOpaque(video->thumbnail));
+				file.shownDimensions = PrepareShownDimensions(video->thumbnail);
 				file.preview = std::move(blurred).scaledToWidth(
 					previewWidth * cIntRetinaFactor(),
 					Qt::SmoothTransformation);

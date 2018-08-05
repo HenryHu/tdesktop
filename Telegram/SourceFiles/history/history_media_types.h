@@ -41,6 +41,8 @@ namespace Ui {
 class EmptyUserpic;
 } // namespace Ui
 
+QString FillAmountAndCurrency(uint64 amount, const QString &currency);
+
 class HistoryFileMedia : public HistoryMedia {
 public:
 	using HistoryMedia::HistoryMedia;
@@ -520,6 +522,7 @@ private:
 	QSize countOptimalSize() override;
 	QSize countCurrentSize(int newWidth) override;
 
+	bool needInfoDisplay() const;
 	int additionalWidth(const HistoryMessageVia *via, const HistoryMessageReply *reply) const;
 	int additionalWidth() const;
 
@@ -849,7 +852,6 @@ public:
 	QString getTitle() const {
 		return _title.originalText();
 	}
-	static QString fillAmountAndCurrency(uint64 amount, const QString &currency);
 
 	bool hideMessageText() const override {
 		return false;

@@ -929,6 +929,10 @@ void ListWidget::markLayoutsStale() {
 	}
 }
 
+bool ListWidget::preventAutoHide() const {
+	return (_contextMenu != nullptr) || (_actionBoxWeak != nullptr);
+}
+
 void ListWidget::saveState(not_null<Memento*> memento) {
 	if (_universalAroundId != kDefaultAroundId) {
 		auto state = countScrollState();
@@ -1165,7 +1169,6 @@ void ListWidget::showContextMenu(
 		QContextMenuEvent *e,
 		ContextMenuSource source) {
 	if (_contextMenu) {
-		_contextMenu->deleteLater();
 		_contextMenu = nullptr;
 		repaintItem(_contextUniversalId);
 	}
@@ -1217,7 +1220,7 @@ void ListWidget::showContextMenu(
 
 	auto link = ClickHandler::getActive();
 
-	_contextMenu = new Ui::PopupMenu(nullptr);
+	_contextMenu = base::make_unique_q<Ui::PopupMenu>(this);
 	_contextMenu->addAction(
 		lang(lng_context_to_msg),
 		[itemFullId = item->fullId()] {
@@ -1297,20 +1300,20 @@ void ListWidget::showContextMenu(
 		if (canForwardAll()) {
 			_contextMenu->addAction(
 				lang(lng_context_forward_selected),
-				base::lambda_guarded(this, [this] {
+				crl::guard(this, [this] {
 					forwardSelected();
 				}));
 		}
 		if (canDeleteAll()) {
 			_contextMenu->addAction(
 				lang(lng_context_delete_selected),
-				base::lambda_guarded(this, [this] {
+				crl::guard(this, [this] {
 					deleteSelected();
 				}));
 		}
 		_contextMenu->addAction(
 			lang(lng_context_clear_selection),
-			base::lambda_guarded(this, [this] {
+			crl::guard(this, [this] {
 				clearSelected();
 			}));
 	} else {
@@ -1318,21 +1321,21 @@ void ListWidget::showContextMenu(
 			if (item->allowsForward()) {
 				_contextMenu->addAction(
 					lang(lng_context_forward_msg),
-					base::lambda_guarded(this, [this, universalId] {
+					crl::guard(this, [this, universalId] {
 						forwardItem(universalId);
 					}));
 			}
 			if (item->canDelete()) {
 				_contextMenu->addAction(
 					lang(lng_context_delete_msg),
-					base::lambda_guarded(this, [this, universalId] {
+					crl::guard(this, [this, universalId] {
 						deleteItem(universalId);
 					}));
 			}
 		}
 		_contextMenu->addAction(
 			lang(lng_context_select_msg),
-			base::lambda_guarded(this, [this, universalId] {
+			crl::guard(this, [this, universalId] {
 				if (hasSelectedText()) {
 					clearSelected();
 				} else if (_selected.size() == MaxSelectedItems) {
@@ -1344,10 +1347,9 @@ void ListWidget::showContextMenu(
 			}));
 	}
 
-	_contextMenu->setDestroyedCallback(base::lambda_guarded(
+	_contextMenu->setDestroyedCallback(crl::guard(
 		this,
 		[this, universalId] {
-			_contextMenu = nullptr;
 			mouseActionUpdate(QCursor::pos());
 			repaintItem(universalId);
 			_checkForHide.fire({});
@@ -2121,7 +2123,12 @@ auto ListWidget::findSectionAfterBottom(
 		[](const Section &section) { return section.top(); });
 }
 
-ListWidget::~ListWidget() = default;
+ListWidget::~ListWidget() {
+	if (_contextMenu) {
+		// We don't want it to be called after ListWidget is destroyed.
+		_contextMenu->setDestroyedCallback(nullptr);
+	}
+}
 
 } // namespace Media
 } // namespace Info

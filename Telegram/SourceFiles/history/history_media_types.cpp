@@ -97,6 +97,61 @@ std::unique_ptr<HistoryMedia> CreateAttach(
 
 } // namespace
 
+QString FillAmountAndCurrency(uint64 amount, const QString &currency) {
+	static const auto ShortCurrencyNames = QMap<QString, QString> {
+		{ qsl("USD"), QString::fromUtf8("\x24") },
+		{ qsl("GBP"), QString::fromUtf8("\xC2\xA3") },
+		{ qsl("EUR"), QString::fromUtf8("\xE2\x82\xAC") },
+		{ qsl("JPY"), QString::fromUtf8("\xC2\xA5") },
+	};
+	static const auto Denominators = QMap<QString, int> {
+		{ qsl("CLF"), 10000 },
+		{ qsl("BHD"), 1000 },
+		{ qsl("IQD"), 1000 },
+		{ qsl("JOD"), 1000 },
+		{ qsl("KWD"), 1000 },
+		{ qsl("LYD"), 1000 },
+		{ qsl("OMR"), 1000 },
+		{ qsl("TND"), 1000 },
+		{ qsl("BIF"), 1 },
+		{ qsl("BYR"), 1 },
+		{ qsl("CLP"), 1 },
+		{ qsl("CVE"), 1 },
+		{ qsl("DJF"), 1 },
+		{ qsl("GNF"), 1 },
+		{ qsl("ISK"), 1 },
+		{ qsl("JPY"), 1 },
+		{ qsl("KMF"), 1 },
+		{ qsl("KRW"), 1 },
+		{ qsl("MGA"), 1 },
+		{ qsl("PYG"), 1 },
+		{ qsl("RWF"), 1 },
+		{ qsl("UGX"), 1 },
+		{ qsl("UYI"), 1 },
+		{ qsl("VND"), 1 },
+		{ qsl("VUV"), 1 },
+		{ qsl("XAF"), 1 },
+		{ qsl("XOF"), 1 },
+		{ qsl("XPF"), 1 },
+		{ qsl("MRO"), 10 },
+	};
+	const auto currencyText = ShortCurrencyNames.value(currency, currency);
+	const auto denominator = Denominators.value(currency, 100);
+	const auto currencyValue = amount / float64(denominator);
+	const auto digits = [&] {
+		auto result = 0;
+		for (auto test = 1; test < denominator; test *= 10) {
+			++result;
+		}
+		return result;
+	}();
+	return QLocale::system().toCurrencyString(currencyValue, currencyText);
+	//auto amountBucks = amount / 100;
+	//auto amountCents = amount % 100;
+	//auto amountText = qsl("%1,%2").arg(amountBucks).arg(amountCents, 2, 10, QChar('0'));
+	//return currencyText + amountText;
+}
+
 void HistoryFileMedia::clickHandlerActiveChanged(const ClickHandlerPtr &p, bool active) {
 	if (p == _savel || p == _cancell) {
 		if (active && !dataLoaded()) {
@@ -490,8 +545,8 @@ TextState HistoryPhoto::textState(QPoint point, StateRequest request) const {
 }
 
 QSize HistoryPhoto::sizeForGrouping() const {
-	const auto width = convertScale(_data->full->width());
-	const auto height = convertScale(_data->full->height());
+	const auto width = _data->full->width();
+	const auto height = _data->full->height();
 	return { std::max(width, 1), std::max(height, 1) };
 }
 
@@ -622,7 +677,7 @@ bool HistoryPhoto::dataLoaded() const {
 }
 
 bool HistoryPhoto::needInfoDisplay() const {
-	return (_data->uploading() || _parent->isUnderCursor());
+	return (_parent->data()->id < 0 || _parent->isUnderCursor());
 }
 
 void HistoryPhoto::validateGroupedCache(
@@ -937,8 +992,12 @@ TextState HistoryVideo::textState(QPoint point, StateRequest request) const {
 }
 
 QSize HistoryVideo::sizeForGrouping() const {
-	const auto width = convertScale(_data->thumb->width());
-	const auto height = convertScale(_data->thumb->height());
+	const auto width = _data->dimensions.isEmpty()
+		? _data->thumb->width()
+		: _data->dimensions.width();
+	const auto height = _data->dimensions.isEmpty()
+		? _data->thumb->height()
+		: _data->dimensions.height();
 	return { std::max(width, 1), std::max(height, 1) };
 }
 
@@ -2725,7 +2784,7 @@ bool HistoryGif::dataLoaded() const {
 }
 
 bool HistoryGif::needInfoDisplay() const {
-	return (_data->uploading() || _parent->isUnderCursor());
+	return (_parent->data()->id < 0 || _parent->isUnderCursor());
 }
 
 HistorySticker::HistorySticker(
@@ -2766,6 +2825,9 @@ QSize HistorySticker::countOptimalSize() {
 	if (_pixh < 1) _pixh = 1;
 	auto maxWidth = qMax(_pixw, st::minPhotoSize);
 	auto minHeight = qMax(_pixh, st::minPhotoSize);
+	accumulate_max(
+		maxWidth,
+		_parent->infoWidth() + 2 * st::msgDateImgPadding.x());
 	if (_parent->media() == this) {
 		maxWidth += additionalWidth();
 	}
@@ -2834,7 +2896,9 @@ void HistorySticker::draw(Painter &p, const QRect &r, TextSelection selection, T
 	if (!inWebPage) {
 		auto fullRight = usex + usew;
 		auto fullBottom = height();
-		_parent->drawInfo(p, fullRight, fullBottom, usex * 2 + usew, selected, InfoDisplayType::Background);
+		if (needInfoDisplay()) {
+			_parent->drawInfo(p, fullRight, fullBottom, usex * 2 + usew, selected, InfoDisplayType::Background);
+		}
 		if (via || reply) {
 			int rectw = width() - usew - st::msgReplyPadding.left();
 			int recth = st::msgReplyPadding.top() + st::msgReplyPadding.bottom();
@@ -2947,6 +3011,10 @@ TextState HistorySticker::textState(QPoint point, StateRequest request) const {
 		return result;
 	}
 	return result;
+}
+
+bool HistorySticker::needInfoDisplay() const {
+	return (_parent->data()->id < 0 || _parent->isUnderCursor());
 }
 
 int HistorySticker::additionalWidth(const HistoryMessageVia *via, const HistoryMessageReply *reply) const {
@@ -4250,63 +4318,6 @@ HistoryInvoice::HistoryInvoice(
 	fillFromData(invoice);
 }
 
-QString HistoryInvoice::fillAmountAndCurrency(
-		uint64 amount,
-		const QString &currency) {
-	static const auto ShortCurrencyNames = QMap<QString, QString> {
-		{ qsl("USD"), QString::fromUtf8("\x24") },
-		{ qsl("GBP"), QString::fromUtf8("\xC2\xA3") },
-		{ qsl("EUR"), QString::fromUtf8("\xE2\x82\xAC") },
-		{ qsl("JPY"), QString::fromUtf8("\xC2\xA5") },
-	};
-	static const auto Denominators = QMap<QString, int> {
-		{ qsl("CLF"), 10000 },
-		{ qsl("BHD"), 1000 },
-		{ qsl("IQD"), 1000 },
-		{ qsl("JOD"), 1000 },
-		{ qsl("KWD"), 1000 },
-		{ qsl("LYD"), 1000 },
-		{ qsl("OMR"), 1000 },
-		{ qsl("TND"), 1000 },
-		{ qsl("BIF"), 1 },
-		{ qsl("BYR"), 1 },
-		{ qsl("CLP"), 1 },
-		{ qsl("CVE"), 1 },
-		{ qsl("DJF"), 1 },
-		{ qsl("GNF"), 1 },
-		{ qsl("ISK"), 1 },
-		{ qsl("JPY"), 1 },
-		{ qsl("KMF"), 1 },
-		{ qsl("KRW"), 1 },
-		{ qsl("MGA"), 1 },
-		{ qsl("PYG"), 1 },
-		{ qsl("RWF"), 1 },
-		{ qsl("UGX"), 1 },
-		{ qsl("UYI"), 1 },
-		{ qsl("VND"), 1 },
-		{ qsl("VUV"), 1 },
-		{ qsl("XAF"), 1 },
-		{ qsl("XOF"), 1 },
-		{ qsl("XPF"), 1 },
-		{ qsl("MRO"), 10 },
-	};
-	const auto currencyText = ShortCurrencyNames.value(currency, currency);
-	const auto denominator = Denominators.value(currency, 100);
-	const auto currencyValue = amount / float64(denominator);
-	const auto digits = [&] {
-		auto result = 0;
-		for (auto test = 1; test < denominator; test *= 10) {
-			++result;
-		}
-		return result;
-	}();
-	return QLocale::system().toCurrencyString(currencyValue, currencyText);
-	//auto amountBucks = amount / 100;
-	//auto amountCents = amount % 100;
-	//auto amountText = qsl("%1,%2").arg(amountBucks).arg(amountCents, 2, 10, QChar('0'));
-	//return currencyText + amountText;
-}
-
 void HistoryInvoice::fillFromData(not_null<Data::Invoice*> invoice) {
 	// init attach
 	auto labelText = [&] {
@@ -4321,7 +4332,7 @@ void HistoryInvoice::fillFromData(not_null<Data::Invoice*> invoice) {
 		return lang(lng_payments_invoice_label);
 	};
 	auto statusText = TextWithEntities {
-		fillAmountAndCurrency(invoice->amount, invoice->currency),
+		FillAmountAndCurrency(invoice->amount, invoice->currency),
 		EntitiesInText()
 	};
 	statusText.entities.push_back(EntityInText(EntityInTextBold, 0, statusText.text.size()));

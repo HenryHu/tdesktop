@@ -526,10 +526,10 @@ void Message::paintFromName(
 		if (item->isPost()) {
 			p.setPen(selected ? st::msgInServiceFgSelected : st::msgInServiceFg);
 		} else {
-			p.setPen(FromNameFg(item->author(), selected));
+			p.setPen(FromNameFg(item->displayFrom(), selected));
 		}
 		item->displayFrom()->nameText.drawElided(p, availableLeft, trect.top(), availableWidth);
-		auto skipWidth = item->author()->nameText.maxWidth() + st::msgServiceFont->spacew;
+		auto skipWidth = item->displayFrom()->nameText.maxWidth() + st::msgServiceFont->spacew;
 		availableLeft += skipWidth;
 		availableWidth -= skipWidth;
 
@@ -861,7 +861,7 @@ bool Message::getStateFromName(
 			auto via = item->Get<HistoryMessageVia>();
 			if (via
 				&& !displayForwardedFrom()
-				&& point.x() >= availableLeft + item->author()->nameText.maxWidth() + st::msgServiceFont->spacew
+				&& point.x() >= availableLeft + item->displayFrom()->nameText.maxWidth() + st::msgServiceFont->spacew
 				&& point.x() < availableLeft + availableWidth
 				&& point.x() < availableLeft + user->nameText.maxWidth() + st::msgServiceFont->spacew + via->width) {
 				outResult->link = via->link;
@@ -1229,6 +1229,15 @@ int Message::infoWidth() const {
 	return result;
 }
 
+void Message::refreshDataIdHook() {
+	if (base::take(_rightActionLink)) {
+		_rightActionLink = rightActionLink();
+	}
+	if (base::take(_fastReplyLink)) {
+		_fastReplyLink = fastReplyLink();
+	}
+}
+
 int Message::timeLeft() const {
 	const auto item = message();
 	auto result = 0;
@@ -1335,6 +1344,7 @@ bool Message::hasFastReply() const {
 
 bool Message::displayFastReply() const {
 	return hasFastReply()
+		&& IsServerMsgId(data()->id)
 		&& data()->history()->peer->canWrite()
 		&& !delegate()->elementInSelectionMode();
 }
@@ -1346,10 +1356,16 @@ bool Message::displayRightAction() const {
 bool Message::displayFastShare() const {
 	const auto item = message();
 	const auto peer = item->history()->peer;
-	if (peer->isChannel()) {
+	if (!IsServerMsgId(item->id)) {
+		return false;
+	} else if (peer->isChannel()) {
 		return !peer->isMegagroup();
 	} else if (const auto user = peer->asUser()) {
-		if (user->botInfo && !item->out()) {
+		if (const auto forwarded = item->Get<HistoryMessageForwarded>()) {
+			return !peer->isSelf()
+				&& forwarded->originalSender->isChannel()
+				&& !forwarded->originalSender->isMegagroup();
+		} else if (user->botInfo && !item->out()) {
 			if (const auto media = this->media()) {
 				return media->allowsFastShare();
 			}
@@ -1498,7 +1514,7 @@ void Message::fromNameUpdated(int width) const {
 			via->resize(width
 				- st::msgPadding.left()
 				- st::msgPadding.right()
-				- item->author()->nameText.maxWidth()
+				- item->displayFrom()->nameText.maxWidth()
 				- st::msgServiceFont->spacew);
 		}
 	}

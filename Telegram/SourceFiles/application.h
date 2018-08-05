@@ -7,11 +7,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-class UpdateChecker;
-
 namespace Core {
 class Launcher;
+class UpdateChecker;
 } // namespace Core
+
+bool InternalPassportLink(const QString &url);
+bool StartUrlRequiresActivate(const QString &url);
 
 class Application : public QApplication {
 	Q_OBJECT
@@ -22,6 +24,7 @@ public:
 	bool event(QEvent *e) override;
 
 	void createMessenger();
+	void refreshGlobalProxy();
 
 	~Application();
 
@@ -58,46 +61,9 @@ private:
 
 	void singleInstanceChecked();
 
-#ifndef TDESKTOP_DISABLE_AUTOUPDATE
-
-// Autoupdating
-public:
-	void startUpdateCheck(bool forceWait);
-	void stopUpdate();
-
-	enum UpdatingState {
-		UpdatingNone,
-		UpdatingDownload,
-		UpdatingReady,
-	};
-	UpdatingState updatingState();
-	int32 updatingSize();
-	int32 updatingReady();
-
-signals:
-	void updateChecking();
-	void updateLatest();
-	void updateProgress(qint64 ready, qint64 total);
-	void updateReady();
-	void updateFailed();
-
-public slots:
-	void updateCheck();
-
-	void updateGotCurrent();
-	void updateFailedCurrent(QNetworkReply::NetworkError e);
-
-	void onUpdateReady();
-	void onUpdateFailed();
-
 private:
-	object_ptr<SingleTimer> _updateCheckTimer = { nullptr };
-	QNetworkReply *_updateReply = nullptr;
-	QNetworkAccessManager _updateManager;
-	QThread *_updateThread = nullptr;
-	UpdateChecker *_updateChecker = nullptr;
+	std::unique_ptr<Core::UpdateChecker> _updateChecker;
 
-#endif // !TDESKTOP_DISABLE_AUTOUPDATE
 };
 
 namespace Sandbox {
@@ -111,22 +77,7 @@ void execExternal(const QString &cmd);
 
 void adjustSingleTimers();
 
-#ifndef TDESKTOP_DISABLE_AUTOUPDATE
-
-void startUpdateCheck();
-void stopUpdate();
-
-Application::UpdatingState updatingState();
-int32 updatingSize();
-int32 updatingReady();
-
-void updateChecking();
-void updateLatest();
-void updateProgress(qint64 ready, qint64 total);
-void updateFailed();
-void updateReady();
-
-#endif // !TDESKTOP_DISABLE_AUTOUPDATE
+void refreshGlobalProxy();
 
 void connect(const char *signal, QObject *object, const char *method);
 

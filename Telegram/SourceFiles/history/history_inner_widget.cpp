@@ -24,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_controller.h"
 #include "window/window_peer_menu.h"
 #include "boxes/confirm_box.h"
+#include "boxes/report_box.h"
 #include "chat_helpers/message_field.h"
 #include "chat_helpers/stickers.h"
 #include "history/history_widget.h"
@@ -1276,8 +1277,9 @@ void HistoryInner::mouseActionFinish(
 			}
 		}
 	}
-	if (App::pressedItem()) {
-		repaintItem(App::pressedItem());
+	const auto pressedItemView = App::pressedItem();
+	if (pressedItemView) {
+		repaintItem(pressedItemView);
 		App::pressedItem(nullptr);
 	}
 
@@ -1285,7 +1287,13 @@ void HistoryInner::mouseActionFinish(
 
 	if (activated) {
 		mouseActionCancel();
-		App::activateClickHandler(activated, button);
+		const auto pressedItemId = pressedItemView
+			? pressedItemView->data()->fullId()
+			: FullMsgId();
+		App::activateClickHandler(activated, {
+			button,
+			QVariant::fromValue(pressedItemId)
+		});
 		return;
 	}
 	if ((_mouseAction == MouseAction::PrepareSelect)
@@ -1448,7 +1456,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		isUponSelected = hasSelected;
 	}
 
-	_menu = base::make_unique_q<Ui::PopupMenu>(nullptr);
+	_menu = base::make_unique_q<Ui::PopupMenu>(this);
 
 	const auto addItemActions = [&](HistoryItem *item) {
 		if (!item
@@ -1564,6 +1572,11 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 						deleteItem(itemId);
 					});
 				}
+				if (item->suggestReport()) {
+					_menu->addAction(lang(lng_context_report_msg), [=] {
+						reportItem(itemId);
+					});
+				}
 			}
 			if (IsServerMsgId(item->id) && !item->serviceMsg()) {
 				_menu->addAction(lang(lng_context_select_msg), [=] {
@@ -1596,6 +1609,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			&& item->canDelete()
 			&& (item->id > 0 || !item->serviceMsg());
 		const auto canForward = item && item->allowsForward();
+		const auto canReport = item && item->suggestReport();
 		const auto view = item ? item->mainView() : nullptr;
 
 		const auto msg = dynamic_cast<HistoryMessage*>(item);
@@ -1674,10 +1688,14 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 						forwardAsGroup(itemId);
 					});
 				}
-
 				if (canDelete) {
 					_menu->addAction(lang((msg && msg->uploading()) ? lng_context_cancel_upload : lng_context_delete_msg), [=] {
 						deleteAsGroup(itemId);
+					});
+				}
+				if (canReport) {
+					_menu->addAction(lang(lng_context_report_msg), [=] {
+						reportAsGroup(itemId);
 					});
 				}
 			}
@@ -1727,12 +1745,13 @@ void HistoryInner::savePhotoToFile(not_null<PhotoData*> photo) {
 
 	auto filter = qsl("JPEG Image (*.jpg);;") + FileDialog::AllFilesFilter();
 	FileDialog::GetWritePath(
+		this,
 		lang(lng_save_photo),
 		filter,
 		filedialogDefaultName(
 			qsl("photo"),
 			qsl(".jpg")),
-		base::lambda_guarded(this, [=](const QString &result) {
+		crl::guard(this, [=](const QString &result) {
 			if (!result.isEmpty()) {
 				photo->full->pix().toImage().save(result, "JPG");
 			}
@@ -2895,6 +2914,22 @@ void HistoryInner::deleteAsGroup(FullMsgId itemId) {
 			return deleteItem(item);
 		}
 		Ui::show(Box<DeleteMessagesBox>(
+			Auth().data().itemsToIds(group->items)));
+	}
+}
+
+void HistoryInner::reportItem(FullMsgId itemId) {
+	Ui::show(Box<ReportBox>(_peer, MessageIdsList(1, itemId)));
+}
+
+void HistoryInner::reportAsGroup(FullMsgId itemId) {
+	if (const auto item = App::histItemById(itemId)) {
+		const auto group = Auth().data().groups().find(item);
+		if (!group) {
+			return reportItem(itemId);
+		}
+		Ui::show(Box<ReportBox>(
+			_peer,
 			Auth().data().itemsToIds(group->items)));
 	}
 }

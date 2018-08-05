@@ -12,6 +12,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 class HistoryItem;
 using HistoryItemsList = std::vector<not_null<HistoryItem*>>;
 
+namespace Ui {
+class InputField;
+} // namespace Ui
+
 namespace Data {
 
 struct UploadState {
@@ -202,6 +206,8 @@ struct FullMsgId {
 
 };
 
+Q_DECLARE_METATYPE(FullMsgId);
+
 using MessageIdsList = std::vector<FullMsgId>;
 
 inline PeerId peerFromMessage(const MTPmessage &msg) {
@@ -284,6 +290,7 @@ enum LocationType {
 	DocumentFileLocation = 0x4e45abe9, // mtpc_inputDocumentFileLocation
 	AudioFileLocation = 0x74dc404d, // mtpc_inputAudioFileLocation
 	VideoFileLocation = 0x3d0364ec, // mtpc_inputVideoFileLocation
+	SecureFileLocation = 0xcbc7ee28, // mtpc_inputSecureFileLocation
 };
 
 enum FileStatus {
@@ -384,16 +391,16 @@ inline MsgId clientMsgId() {
 struct MessageCursor {
 	MessageCursor() = default;
 	MessageCursor(int position, int anchor, int scroll)
-		: position(position)
-		, anchor(anchor)
-		, scroll(scroll) {
+	: position(position)
+	, anchor(anchor)
+	, scroll(scroll) {
 	}
-	MessageCursor(const QTextEdit *edit) {
-		fillFrom(edit);
+	MessageCursor(not_null<const Ui::InputField*> field) {
+		fillFrom(field);
 	}
 
-	void fillFrom(const QTextEdit *edit);
-	void applyTo(QTextEdit *edit);
+	void fillFrom(not_null<const Ui::InputField*> field);
+	void applyTo(not_null<Ui::InputField*> field);
 
 	int position = 0;
 	int anchor = 0;

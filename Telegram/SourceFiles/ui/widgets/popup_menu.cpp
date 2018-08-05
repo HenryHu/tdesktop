@@ -15,32 +15,45 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 
 namespace Ui {
+namespace {
 
-PopupMenu::PopupMenu(QWidget*, const style::PopupMenu &st) : TWidget(nullptr)
+bool InactiveMacApplication() {
+	return (cPlatform() == dbipMac || cPlatform() == dbipMacOld)
+		&& !Platform::IsApplicationActive();
+}
+
+} // namespace
+
+PopupMenu::PopupMenu(QWidget *parent, const style::PopupMenu &st)
+: RpWidget(parent)
 , _st(st)
 , _menu(this, _st.menu) {
 	init();
 }
 
-PopupMenu::PopupMenu(QWidget*, QMenu *menu, const style::PopupMenu &st) : TWidget(nullptr)
+PopupMenu::PopupMenu(QWidget *parent, QMenu *menu, const style::PopupMenu &st)
+: RpWidget(parent)
 , _st(st)
 , _menu(this, menu, _st.menu) {
 	init();
 
 	for (auto action : actions()) {
 		if (auto submenu = action->menu()) {
-			auto it = _submenus.insert(action, new PopupMenu(nullptr, submenu, st));
+			auto it = _submenus.insert(action, new PopupMenu(parentWidget(), submenu, st));
 			it.value()->deleteOnHide(false);
 		}
 	}
 }
 
 void PopupMenu::init() {
-	subscribe(Messenger::Instance().passcodedChanged(), [this] {
-		if (App::passcoded()) {
-			hideMenu(true);
-		}
-	});
+	using namespace rpl::mappers;
+
+	rpl::merge(
+		Messenger::Instance().passcodeLockChanges(),
+		Messenger::Instance().termsLockChanges()
+	) | rpl::start_with_next([=] {
+		hideMenu(true);
+	}, lifetime());
 
 	_menu->setResizedCallback([this] { handleMenuResize(); });
 	_menu->setActivatedCallback([this](QAction *action, int actionTop, TriggeredSource source) {
@@ -82,7 +95,7 @@ QAction *PopupMenu::addAction(const QString &text, const QObject *receiver, cons
 	return _menu->addAction(text, receiver, member, icon, iconOver);
 }
 
-QAction *PopupMenu::addAction(const QString &text, base::lambda<void()> callback, const style::icon *icon, const style::icon *iconOver) {
+QAction *PopupMenu::addAction(const QString &text, Fn<void()> callback, const style::icon *icon, const style::icon *iconOver) {
 	return _menu->addAction(text, std::move(callback), icon, iconOver);
 }
 
@@ -270,6 +283,9 @@ void PopupMenu::childHiding(PopupMenu *child) {
 	if (_activeSubmenu && _activeSubmenu == child) {
 		_activeSubmenu = SubmenuPointer();
 	}
+	if (!_hiding && !isHidden()) {
+		activateWindow();
+	}
 }
 
 void PopupMenu::setOrigin(PanelAnimation::Origin origin) {
@@ -415,6 +431,17 @@ void PopupMenu::popup(const QPoint &p) {
 }
 
 void PopupMenu::showMenu(const QPoint &p, PopupMenu *parent, TriggeredSource source) {
+	if (!parent && InactiveMacApplication()) {
+		_hiding = false;
+		_a_opacity.finish();
+		_a_show.finish();
+		_cache = QPixmap();
+		hide();
+		if (_deleteOnHide) {
+			deleteLater();
+		}
+		return;
+	}
 	_parent = parent;
 
 	auto origin = PanelAnimation::Origin::TopLeft;
@@ -467,16 +494,19 @@ void PopupMenu::showMenu(const QPoint &p, PopupMenu *parent, TriggeredSource sou
 	psUpdateOverlayed(this);
 	show();
 	psShowOverAll(this);
-	windowHandle()->requestActivate();
 	activateWindow();
 }
 
 PopupMenu::~PopupMenu() {
-	for (auto submenu : base::take(_submenus)) {
+	for (const auto submenu : base::take(_submenus)) {
 		delete submenu;
 	}
-	if (auto w = App::wnd()) {
-		w->reActivateWindow();
+	if (const auto parent = parentWidget()) {
+		crl::on_main(parent, [=] {
+			if (!parent->isHidden()) {
+				parent->activateWindow();
+			}
+		});
 	}
 	if (_destroyedCallback) {
 		_destroyedCallback();

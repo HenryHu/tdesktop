@@ -100,10 +100,6 @@ build() {
   fi
 
   # Configure the build
-  if [[ $BUILD_VERSION == *"disable_autoupdate"* ]]; then
-    GYP_DEFINES+=",TDESKTOP_DISABLE_AUTOUPDATE"
-  fi
-
   if [[ $BUILD_VERSION == *"disable_register_custom_scheme"* ]]; then
     GYP_DEFINES+=",TDESKTOP_DISABLE_REGISTER_CUSTOM_SCHEME"
   fi
@@ -585,10 +581,10 @@ buildCustomQt() {
   info_msg "Downloading and building patched qt"
 
   if [ -d "$EXTERNAL/qt${QT_VERSION}" ]; then
-    rm -rf "$EXTERNAL/qt${QT_VERSION}"
+    sudo rm -rf "$EXTERNAL/qt${QT_VERSION}"
   fi
   cd $QT_PATH
-  rm -rf *
+  sudo rm -rf *
 
   cd "$EXTERNAL"
   git clone git://code.qt.io/qt/qt5.git qt${QT_VERSION}

@@ -209,15 +209,15 @@ void FastShareMessage(not_null<HistoryItem*> item) {
 		return false;
 	};
 	auto copyLinkCallback = canCopyLink
-		? base::lambda<void()>(std::move(copyCallback))
-		: base::lambda<void()>();
+		? Fn<void()>(std::move(copyCallback))
+		: Fn<void()>();
 	Ui::show(Box<ShareBox>(
 		std::move(copyLinkCallback),
 		std::move(submitCallback),
 		std::move(filterCallback)));
 }
 
-base::lambda<void(ChannelData*, MsgId)> HistoryDependentItemCallback(
+Fn<void(ChannelData*, MsgId)> HistoryDependentItemCallback(
 		const FullMsgId &msgId) {
 	return [dependent = msgId](ChannelData *channel, MsgId msgId) {
 		if (auto item = App::histItemById(dependent)) {
@@ -610,7 +610,7 @@ bool HistoryMessage::allowsEdit(TimeId now) const {
 			return true;
 		}
 		if (out()) {
-			return !isPost() || channel->canPublish();
+			return isPost() ? channel->canPublish() : channel->canWrite();
 		}
 	}
 	return out();
@@ -1080,8 +1080,14 @@ void HistoryMessage::setViewsCount(int32 count) {
 
 void HistoryMessage::setRealId(MsgId newId) {
 	HistoryItem::setRealId(newId);
+
 	Auth().data().groups().refreshMessage(this);
 	Auth().data().requestItemResize(this);
+	if (const auto reply = Get<HistoryMessageReply>()) {
+		if (reply->replyToLink()) {
+			reply->setReplyToLinkFrom(this);
+		}
+	}
 }
 
 void HistoryMessage::dependencyItemRemoved(HistoryItem *dependency) {

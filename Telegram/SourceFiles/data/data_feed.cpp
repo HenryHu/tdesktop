@@ -150,7 +150,7 @@ void Feed::unregisterOne(not_null<ChannelData*> channel) {
 void Feed::updateLastMessage(not_null<HistoryItem*> item) {
 	if (justUpdateLastMessage(item)) {
 		if (_lastMessage && *_lastMessage) {
-			setChatsListDate(ItemDateTime(*_lastMessage));
+			setChatsListTimeId((*_lastMessage)->date());
 		}
 	}
 }
@@ -304,7 +304,7 @@ void Feed::setLastMessageFromChannels() {
 
 void Feed::updateChatsListDate() {
 	if (_lastMessage && *_lastMessage) {
-		setChatsListDate(ItemDateTime(*_lastMessage));
+		setChatsListTimeId((*_lastMessage)->date());
 	}
 }
 
@@ -443,12 +443,20 @@ bool Feed::toImportant() const {
 	return false; // TODO feeds workmode
 }
 
+bool Feed::useProxyPromotion() const {
+	return false;
+}
+
 bool Feed::shouldBeInChatList() const {
 	return _channels.size() > 1;
 }
 
 int Feed::chatListUnreadCount() const {
 	return unreadCount();
+}
+
+bool Feed::chatListUnreadMark() const {
+	return false; // #feed unread mark
 }
 
 bool Feed::chatListMutedBadge() const {

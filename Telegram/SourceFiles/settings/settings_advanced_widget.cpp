@@ -62,13 +62,10 @@ void AdvancedWidget::createControls() {
 	} else {
 		style::margins slidedPadding(0, marginLarge.bottom() / 2, 0, marginLarge.bottom() - (marginLarge.bottom() / 2));
 		createChildRow(_useDefaultTheme, marginLarge, slidedPadding, lang(lng_settings_bg_use_default), SLOT(onUseDefaultTheme()));
-		if (!Window::Theme::IsNonDefaultUsed()) {
+		if (!Window::Theme::SuggestThemeReset()) {
 			_useDefaultTheme->hide(anim::type::instant);
 		}
-		createChildRow(_toggleNightTheme, marginLarge, slidedPadding, getNightThemeToggleText(), SLOT(onToggleNightTheme()));
-		if (Window::Theme::IsNonDefaultUsed()) {
-			_toggleNightTheme->hide(anim::type::instant);
-		}
+		createChildRow(_toggleNightTheme, marginLarge, getNightThemeToggleText(), SLOT(onToggleNightTheme()));
 	}
 	createChildRow(_telegramFAQ, marginLarge, lang(lng_settings_faq), SLOT(onTelegramFAQ()));
 	if (self()) {
@@ -78,14 +75,13 @@ void AdvancedWidget::createControls() {
 }
 
 void AdvancedWidget::checkNonDefaultTheme() {
-	if (self()) return;
+	if (self()) {
+		return;
+	}
 	_useDefaultTheme->toggle(
-		Window::Theme::IsNonDefaultUsed(),
+		Window::Theme::SuggestThemeReset(),
 		anim::type::normal);
-	_toggleNightTheme->entity()->setText(getNightThemeToggleText());
-	_toggleNightTheme->toggle(
-		!Window::Theme::IsNonDefaultUsed(),
-		anim::type::normal);
+	_toggleNightTheme->setText(getNightThemeToggleText());
 }
 
 void AdvancedWidget::onManageLocalStorage() {
@@ -94,26 +90,24 @@ void AdvancedWidget::onManageLocalStorage() {
 
 #ifndef TDESKTOP_DISABLE_NETWORK_PROXY
 void AdvancedWidget::connectionTypeUpdated() {
-	auto connection = [] {
-		switch (Global::ConnectionType()) {
-		case dbictHttpProxy:
-		case dbictTcpProxy: {
-			auto transport = MTP::dctransport();
-			return transport.isEmpty() ? lang(lng_connection_proxy_connecting) : lng_connection_proxy(lt_transport, transport);
-		} break;
-		case dbictAuto:
-		default: {
-			auto transport = MTP::dctransport();
-			return transport.isEmpty() ? lang(lng_connection_auto_connecting) : lng_connection_auto(lt_transport, transport);
-		} break;
+	const auto connection = [] {
+		const auto transport = MTP::dctransport();
+		if (!Global::UseProxy()) {
+			return transport.isEmpty()
+				? lang(lng_connection_auto_connecting)
+				: lng_connection_auto(lt_transport, transport);
+		} else {
+			return transport.isEmpty()
+				? lang(lng_connection_proxy_connecting)
+				: lng_connection_proxy(lt_transport, transport);
 		}
-	};
-	_connectionType->link()->setText(connection());
+	}();
+	_connectionType->link()->setText(connection);
 	resizeToWidth(width());
 }
 
 void AdvancedWidget::onConnectionType() {
-	Ui::show(Box<ConnectionBox>());
+	Ui::show(ProxiesBoxController::CreateOwningBox());
 }
 #endif // !TDESKTOP_DISABLE_NETWORK_PROXY
 
@@ -122,13 +116,13 @@ void AdvancedWidget::onUseDefaultTheme() {
 }
 
 void AdvancedWidget::onToggleNightTheme() {
-	Window::Theme::SwitchNightTheme(!Window::Theme::IsNightTheme());
+	Window::Theme::ToggleNightMode();
 }
 
 void AdvancedWidget::onAskQuestion() {
-	auto box = Box<ConfirmBox>(lang(lng_settings_ask_sure), lang(lng_settings_ask_ok), lang(lng_settings_faq_button), base::lambda_guarded(this, [this] {
+	auto box = Box<ConfirmBox>(lang(lng_settings_ask_sure), lang(lng_settings_ask_ok), lang(lng_settings_faq_button), crl::guard(this, [this] {
 		onAskQuestionSure();
-	}), base::lambda_guarded(this, [this] {
+	}), crl::guard(this, [this] {
 		onTelegramFAQ();
 	}));
 	box->setStrictCancel(true);
@@ -151,7 +145,9 @@ void AdvancedWidget::supportGot(const MTPhelp_Support &support) {
 }
 
 QString AdvancedWidget::getNightThemeToggleText() const {
-	return lang(Window::Theme::IsNightTheme() ? lng_settings_disable_night_theme : lng_settings_enable_night_theme);
+	return lang(Window::Theme::IsNightMode()
+		? lng_settings_disable_night_theme
+		: lng_settings_enable_night_theme);
 }
 
 void AdvancedWidget::onTelegramFAQ() {

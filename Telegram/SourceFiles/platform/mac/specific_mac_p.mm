@@ -29,6 +29,8 @@ namespace {
 
 constexpr auto kIgnoreActivationTimeoutMs = 500;
 
+base::optional<bool> ApplicationIsActive;
+
 } // namespace
 
 using Platform::Q2NSString;
@@ -85,6 +87,7 @@ using Platform::NS2QString;
 - (BOOL) applicationShouldHandleReopen:(NSApplication *)theApplication hasVisibleWindows:(BOOL)flag;
 - (void) applicationDidFinishLaunching:(NSNotification *)aNotification;
 - (void) applicationDidBecomeActive:(NSNotification *)aNotification;
+- (void) applicationDidResignActive:(NSNotification *)aNotification;
 - (void) receiveWakeNote:(NSNotification*)note;
 
 - (void) setWatchingMediaKeys:(bool)watching;
@@ -126,6 +129,7 @@ ApplicationDelegate *_sharedDelegate = nil;
 }
 
 - (void) applicationDidBecomeActive:(NSNotification *)aNotification {
+	ApplicationIsActive = true;
 	if (auto messenger = Messenger::InstancePointer()) {
 		if (!_ignoreActivation) {
 			messenger->handleAppActivated();
@@ -136,6 +140,10 @@ ApplicationDelegate *_sharedDelegate = nil;
 			}
 		}
 	}
+}
+
+- (void) applicationDidResignActive:(NSNotification *)aNotification {
+	ApplicationIsActive = false;
 }
 
 - (void) receiveWakeNote:(NSNotification*)aNotification {
@@ -185,6 +193,12 @@ void SetWatchingMediaKeys(bool watching) {
 	if (_sharedDelegate) {
 		[_sharedDelegate setWatchingMediaKeys:watching];
 	}
+}
+
+bool IsApplicationActive() {
+	return ApplicationIsActive
+		? *ApplicationIsActive
+		: (static_cast<QApplication*>(QApplication::instance())->activeWindow() != nullptr);
 }
 
 void InitOnTopPanel(QWidget *panel) {
@@ -392,13 +406,6 @@ void objc_finish() {
 		[_downloadPathUrl stopAccessingSecurityScopedResource];
 		_downloadPathUrl = nil;
 	}
-}
-
-void objc_registerCustomScheme() {
-#ifndef TDESKTOP_DISABLE_REGISTER_CUSTOM_SCHEME
-	OSStatus result = LSSetDefaultHandlerForURLScheme(CFSTR("tg"), (CFStringRef)[[NSBundle mainBundle] bundleIdentifier]);
-	DEBUG_LOG(("App Info: set default handler for 'tg' scheme result: %1").arg(result));
-#endif // !TDESKTOP_DISABLE_REGISTER_CUSTOM_SCHEME
 }
 
 void objc_activateProgram(WId winId) {

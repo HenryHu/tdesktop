@@ -13,9 +13,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Window {
 namespace Theme {
-struct Cached;
+struct Saved;
 } // namespace Theme
 } // namespace Window
+
+namespace Export {
+struct Settings;
+} // namespace Export
 
 namespace Local {
 
@@ -26,6 +30,9 @@ void readSettings();
 void writeSettings();
 void writeUserSettings();
 void writeMtpData();
+
+void writeAutoupdatePrefix(const QString &prefix);
+QString readAutoupdatePrefix();
 
 void reset();
 
@@ -145,17 +152,20 @@ int32 countSavedGifsHash();
 void writeBackground(int32 id, const QImage &img);
 bool readBackground();
 
-void writeTheme(const QString &pathRelative, const QString &pathAbsolute, const QByteArray &content, const Window::Theme::Cached &cache);
+void writeTheme(const Window::Theme::Saved &saved);
 void clearTheme();
-bool hasTheme();
-QString themeAbsolutePath();
-QString themePaletteAbsolutePath();
 bool copyThemeColorsToPalette(const QString &file);
+Window::Theme::Saved readThemeAfterSwitch();
 
 void writeLangPack();
 
 void writeRecentHashtagsAndBots();
 void readRecentHashtagsAndBots();
+void saveRecentSentHashtags(const QString &text);
+void saveRecentSearchHashtags(const QString &text);
+
+void WriteExportSettings(const Export::Settings &settings);
+Export::Settings ReadExportSettings();
 
 void addSavedPeer(PeerData *peer, const QDateTime &position);
 void removeSavedPeer(PeerData *peer);

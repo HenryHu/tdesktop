@@ -70,8 +70,8 @@ PeerClickHandler::PeerClickHandler(not_null<PeerData*> peer)
 : _peer(peer) {
 }
 
-void PeerClickHandler::onClick(Qt::MouseButton button) const {
-	if (button == Qt::LeftButton && App::wnd()) {
+void PeerClickHandler::onClick(ClickContext context) const {
+	if (context.button == Qt::LeftButton && App::wnd()) {
 		auto controller = App::wnd()->controller();
 		if (_peer
 			&& _peer->isChannel()
@@ -435,7 +435,11 @@ void UserData::setName(const QString &newFirstName, const QString &newLastName, 
 }
 
 void UserData::setPhone(const QString &newPhone) {
-	_phone = newPhone;
+	if (_phone != newPhone) {
+		_phone = newPhone;
+		if (bareId() == Auth().userId()) {
+		}
+	}
 }
 
 void UserData::setBotInfoVersion(int version) {

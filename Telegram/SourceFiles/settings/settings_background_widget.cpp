@@ -33,15 +33,17 @@ BackgroundRow::BackgroundRow(QWidget *parent) : RpWidget(parent)
 	connect(_chooseFromFile, SIGNAL(clicked()), this, SIGNAL(chooseFromFile()));
 	connect(_editTheme, SIGNAL(clicked()), this, SIGNAL(editTheme()));
 	checkNonDefaultTheme();
-	subscribe(Window::Theme::Background(), [this](const Window::Theme::BackgroundUpdate &update) {
-		if (update.type == Window::Theme::BackgroundUpdate::Type::ApplyingTheme) {
+	using Update = const Window::Theme::BackgroundUpdate;
+	subscribe(Window::Theme::Background(), [this](Update &update) {
+		if (update.type == Update::Type::ApplyingTheme
+			|| update.type == Update::Type::New) {
 			checkNonDefaultTheme();
 		}
 	});
 }
 
 void BackgroundRow::checkNonDefaultTheme() {
-	if (Window::Theme::IsNonDefaultUsed()) {
+	if (Window::Theme::SuggestThemeReset()) {
 		if (!_useDefaultTheme) {
 			_useDefaultTheme.create(this, lang(lng_settings_bg_use_default), st::boxLinkButton);
 			_useDefaultTheme->show();
@@ -190,7 +192,8 @@ BackgroundWidget::BackgroundWidget(QWidget *parent, UserData *self) : BlockWidge
 	subscribe(Window::Theme::Background(), [this](const Update &update) {
 		if (update.type == Update::Type::New) {
 			_background->updateImage();
-		} else if (update.type == Update::Type::Start) {
+		} else if (update.type == Update::Type::Start
+			|| update.type == Update::Type::Changed) {
 			needBackgroundUpdate(update.tiled);
 		}
 	});
@@ -231,7 +234,7 @@ void BackgroundWidget::onChooseFromFile() {
 	auto imgExtensions = cImgExtensions();
 	auto filters = QStringList(qsl("Theme files (*.tdesktop-theme *.tdesktop-palette *") + imgExtensions.join(qsl(" *")) + qsl(")"));
 	filters.push_back(FileDialog::AllFilesFilter());
-	FileDialog::GetOpenPath(lang(lng_choose_image), filters.join(qsl(";;")), base::lambda_guarded(this, [this](const FileDialog::OpenResult &result) {
+	const auto callback = [=](const FileDialog::OpenResult &result) {
 		if (result.paths.isEmpty() && result.remoteContent.isEmpty()) {
 			return;
 		}
@@ -263,7 +266,12 @@ void BackgroundWidget::onChooseFromFile() {
 		Window::Theme::Background()->setImage(Window::Theme::kCustomBackground, std::move(img));
 		_tile->setChecked(false);
 		_background->updateImage();
-	}));
+	};
+	FileDialog::GetOpenPath(
+		this,
+		lang(lng_choose_image),
+		filters.join(qsl(";;")),
+		crl::guard(this, callback));
 }
 
 void BackgroundWidget::onEditTheme() {

@@ -86,7 +86,11 @@ void CrossFadeAnimation::paintLine(Painter &p, const Line &line, float64 positio
 	}
 }
 
-LabelSimple::LabelSimple(QWidget *parent, const style::LabelSimple &st, const QString &value) : TWidget(parent)
+LabelSimple::LabelSimple(
+	QWidget *parent,
+	const style::LabelSimple &st,
+	const QString &value)
+: RpWidget(parent)
 , _st(st) {
 	setText(value);
 }
@@ -268,8 +272,8 @@ void FlatLabel::setLink(uint16 lnkIndex, const ClickHandlerPtr &lnk) {
 	_text.setLink(lnkIndex, lnk);
 }
 
-void FlatLabel::setClickHandlerHook(ClickHandlerHook &&hook) {
-	_clickHandlerHook = std::move(hook);
+void FlatLabel::setClickHandlerFilter(ClickHandlerFilter &&filter) {
+	_clickHandlerFilter = std::move(filter);
 }
 
 void FlatLabel::mouseMoveEvent(QMouseEvent *e) {
@@ -354,7 +358,8 @@ Text::StateResult FlatLabel::dragActionFinish(const QPoint &p, Qt::MouseButton b
 	_selectionType = TextSelectType::Letters;
 
 	if (activated) {
-		if (!_clickHandlerHook || _clickHandlerHook(activated, button)) {
+		if (!_clickHandlerFilter
+			|| _clickHandlerFilter(activated, button)) {
 			App::activateClickHandler(activated, button);
 		}
 	}
@@ -534,7 +539,7 @@ void FlatLabel::showContextMenu(QContextMenuEvent *e, ContextMenuReason reason) 
 		uponSelection = hasSelection;
 	}
 
-	_contextMenu = new Ui::PopupMenu(nullptr);
+	_contextMenu = new Ui::PopupMenu(this);
 
 	if (fullSelection && !_contextCopyText.isEmpty()) {
 		_contextMenu->addAction(_contextCopyText, this, SLOT(onCopyContextText()));
@@ -816,6 +821,16 @@ void FlatLabel::paintEvent(QPaintEvent *e) {
 	} else {
 		_text.draw(p, _st.margin.left(), _st.margin.top(), textWidth, _st.align, e->rect().y(), e->rect().bottom(), selection);
 	}
+}
+
+int DividerLabel::naturalWidth() const {
+	return -1;
+}
+
+void DividerLabel::resizeEvent(QResizeEvent *e) {
+	_background->lower();
+	_background->setGeometry(rect());
+	return PaddingWrap::resizeEvent(e);
 }
 
 } // namespace Ui

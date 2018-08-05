@@ -9,17 +9,28 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "boxes/abstract_box.h"
 
+namespace Window {
+class Controller;
+} // namespace Window
+
 namespace Data {
 class Media;
 } // namespace Data
 
 namespace Ui {
-class InputArea;
+class InputField;
 } // namespace Ui
+
+namespace Window {
+class Controller;
+} // namespace Window
 
 class EditCaptionBox : public BoxContent, public RPCSender {
 public:
-	EditCaptionBox(QWidget*, not_null<HistoryItem*> item);
+	EditCaptionBox(
+		QWidget*,
+		not_null<Window::Controller*> controller,
+		not_null<HistoryItem*> item);
 
 protected:
 	void prepare() override;
@@ -30,7 +41,7 @@ protected:
 
 private:
 	void updateBoxSize();
-	void prepareGifPreview(DocumentData *document);
+	void prepareGifPreview(not_null<DocumentData*> document);
 	void clipCallback(Media::Clip::Notification notification);
 
 	void save();
@@ -41,7 +52,11 @@ private:
 
 	int errorTopSkip() const;
 
+	not_null<Window::Controller*> _controller;
 	FullMsgId _msgId;
+	ImagePtr _thumbnailImage;
+	bool _thumbnailImageLoaded = false;
+	Fn<void()> _refreshThumbnail;
 	bool _animated = false;
 	bool _photo = false;
 	bool _doc = false;
@@ -49,7 +64,7 @@ private:
 	QPixmap _thumb;
 	Media::Clip::ReaderPointer _gifPreview;
 
-	object_ptr<Ui::InputArea> _field = { nullptr };
+	object_ptr<Ui::InputField> _field = { nullptr };
 
 	int _thumbx = 0;
 	int _thumbw = 0;

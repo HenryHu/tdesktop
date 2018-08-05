@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwindow.h"
 #include "application.h"
 #include "core/file_utilities.h"
+#include "core/mime_type.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/buttons.h"
 #include "ui/text_options.h"
@@ -116,7 +117,7 @@ MediaView::MediaView()
 	});
 	handleAuthSessionChange();
 
-	setWindowFlags(Qt::FramelessWindowHint | Qt::BypassWindowManagerHint | Qt::Tool | Qt::NoDropShadowWindowHint);
+	setWindowFlags(Qt::FramelessWindowHint);
 	moveToScreen();
 	setAttribute(Qt::WA_NoSystemBackground, true);
 	setAttribute(Qt::WA_TranslucentBackground, true);
@@ -124,7 +125,11 @@ MediaView::MediaView()
 
 	hide();
 	createWinId();
-	if (cPlatform() == dbipWindows) {
+	if (cPlatform() == dbipLinux32 || cPlatform() == dbipLinux64) {
+		windowHandle()->setTransientParent(App::wnd()->windowHandle());
+		setWindowModality(Qt::WindowModal);
+	}
+	if (cPlatform() != dbipMac && cPlatform() != dbipMacOld) {
 		setWindowState(Qt::WindowFullScreen);
 	}
 
@@ -164,7 +169,8 @@ void MediaView::moveToScreen() {
 	if (activeWindowScreen && myScreen && myScreen != activeWindowScreen) {
 		windowHandle()->setScreen(activeWindowScreen);
 	}
-	auto available = activeWindow ? Sandbox::screenGeometry(activeWindow->geometry().center()) : QApplication::desktop()->screenGeometry();
+	const auto screen = activeWindowScreen ? activeWindowScreen : QApplication::primaryScreen();
+	const auto available = screen->geometry();
 	if (geometry() != available) {
 		setGeometry(available);
 	}
@@ -807,7 +813,7 @@ void MediaView::onSaveAs() {
 			QFileInfo alreadyInfo(location.name());
 			QDir alreadyDir(alreadyInfo.dir());
 			QString name = alreadyInfo.fileName(), filter;
-			MimeType mimeType = mimeTypeForName(_doc->mimeString());
+			const auto mimeType = Core::MimeTypeForName(_doc->mimeString());
 			QStringList p = mimeType.globPatterns();
 			QString pattern = p.isEmpty() ? QString() : p.front();
 			if (name.isEmpty()) {
@@ -851,6 +857,7 @@ void MediaView::onSaveAs() {
 		psBringToBack(this);
 		auto filter = qsl("JPEG Image (*.jpg);;") + FileDialog::AllFilesFilter();
 		FileDialog::GetWritePath(
+			this,
 			lang(lng_save_photo),
 			filter,
 			filedialogDefaultName(
@@ -859,12 +866,12 @@ void MediaView::onSaveAs() {
 				QString(),
 				false,
 				_photo->date),
-			base::lambda_guarded(this, [this, photo = _photo](const QString &result) {
+			crl::guard(this, [this, photo = _photo](const QString &result) {
 				if (!result.isEmpty() && _photo == photo && photo->loaded()) {
 					photo->full->pix().toImage().save(result, "JPG");
 				}
 				psShowOverAll(this);
-			}), base::lambda_guarded(this, [this] {
+			}), crl::guard(this, [this] {
 				psShowOverAll(this);
 			}));
 	}
@@ -2845,7 +2852,7 @@ void MediaView::contextMenuEvent(QContextMenuEvent *e) {
 			_menu->deleteLater();
 			_menu = 0;
 		}
-		_menu = new Ui::PopupMenu(nullptr, st::mediaviewPopupMenu);
+		_menu = new Ui::PopupMenu(this, st::mediaviewPopupMenu);
 		updateActions();
 		for_const (auto &action, _actions) {
 			_menu->addAction(action.text, this, action.member);
@@ -2960,9 +2967,6 @@ bool MediaView::eventFilter(QObject *obj, QEvent *e) {
 				activate = true;
 			}
 			if (activate) {
-				if (_controlsState == ControlsHiding || _controlsState == ControlsHidden) {
-					int a = 0;
-				}
 				activateControls();
 			}
 		}

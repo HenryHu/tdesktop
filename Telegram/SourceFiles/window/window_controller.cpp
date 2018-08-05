@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/player/media_player_round_controller.h"
 #include "data/data_session.h"
 #include "data/data_feed.h"
+#include "passport/passport_form_controller.h"
 #include "boxes/calendar_box.h"
 #include "mainwidget.h"
 #include "mainwindow.h"
@@ -34,7 +35,7 @@ void DateClickHandler::setDate(QDate date) {
 	_date = date;
 }
 
-void DateClickHandler::onClick(Qt::MouseButton) const {
+void DateClickHandler::onClick(ClickContext context) const {
 	App::wnd()->controller()->showJumpToDate(_chat, _date);
 }
 
@@ -333,14 +334,14 @@ void Controller::showJumpToDate(Dialogs::Key chat, QDate requestedDate) {
 						return history->blocks.front()->messages.front()->dateTime().date();
 					}
 				}
-			} else if (!history->chatsListDate().isNull()) {
-				return history->chatsListDate().date();
+			} else if (history->chatsListTimeId() != 0) {
+				return ParseDateTime(history->chatsListTimeId()).date();
 			}
 		} else if (const auto feed = chat.feed()) {
 			/*if (chatScrollPosition(feed)) { // #TODO feeds save position
 
-			} else */if (!feed->chatsListDate().isNull()) {
-				return feed->chatsListDate().date();
+			} else */if (feed->chatsListTimeId() != 0) {
+				return ParseDateTime(feed->chatsListTimeId()).date();
 			}
 		}
 		return QDate::currentDate();
@@ -350,12 +351,12 @@ void Controller::showJumpToDate(Dialogs::Key chat, QDate requestedDate) {
 			if (const auto channel = history->peer->migrateTo()) {
 				history = App::historyLoaded(channel);
 			}
-			if (history && !history->chatsListDate().isNull()) {
-				return history->chatsListDate().date();
+			if (history && history->chatsListTimeId() != 0) {
+				return ParseDateTime(history->chatsListTimeId()).date();
 			}
 		} else if (const auto feed = chat.feed()) {
-			if (!feed->chatsListDate().isNull()) {
-				return feed->chatsListDate().date();
+			if (feed->chatsListTimeId() != 0) {
+				return ParseDateTime(feed->chatsListTimeId()).date();
 			}
 		}
 		return QDate::currentDate();
@@ -402,6 +403,17 @@ void Controller::showJumpToDate(Dialogs::Key chat, QDate requestedDate) {
 	box->setMinDate(minPeerDate(chat));
 	box->setMaxDate(maxPeerDate(chat));
 	Ui::show(std::move(box));
+}
+
+void Controller::showPassportForm(const Passport::FormRequest &request) {
+	_passportForm = std::make_unique<Passport::FormController>(
+		this,
+		request);
+	_passportForm->show();
+}
+
+void Controller::clearPassportForm() {
+	_passportForm = nullptr;
 }
 
 void Controller::updateColumnLayout() {
@@ -464,9 +476,9 @@ void Navigation::showPeerInfo(
 void Controller::showSection(
 		SectionMemento &&memento,
 		const SectionShow &params) {
-	if (App::wnd()->showSectionInExistingLayer(
+	if (!params.thirdColumn && App::wnd()->showSectionInExistingLayer(
 			&memento,
-			params) && !params.thirdColumn) {
+			params)) {
 		return;
 	}
 	App::main()->showSection(std::move(memento), params);
