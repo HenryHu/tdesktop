@@ -45,6 +45,7 @@
       '<(linux_path_breakpad)/lib',
     ],
     'libraries': [
+      'lzma',
       'openal',
       'avformat',
       'avcodec',
