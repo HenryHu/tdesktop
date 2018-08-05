@@ -48,7 +48,7 @@
         '<(SHARED_INTERMEDIATE_DIR)/scheme.h',
       ],
       'action': [
-        'python', '<(src_loc)/codegen/scheme/codegen_scheme.py',
+        '%%PYTHON_CMD%%', '<(src_loc)/codegen/scheme/codegen_scheme.py',
         '-o', '<(SHARED_INTERMEDIATE_DIR)', '<(res_loc)/scheme.tl',
       ],
       'message': 'codegen_scheme-ing scheme.tl..',
