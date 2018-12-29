@@ -11,10 +11,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "chat_helpers/stickers.h"
 #include "dialogs/dialogs_key.h"
 #include "data/data_groups.h"
+#include "history/history_location_manager.h"
 #include "base/timer.h"
 
 class HistoryItem;
 class BoxContent;
+struct WebPageCollage;
+enum class WebPageType;
 
 namespace HistoryView {
 struct Group;
@@ -243,6 +246,7 @@ public:
 		not_null<const DocumentData*> document);
 	void requestDocumentViewRepaint(not_null<const DocumentData*> document);
 	void markMediaRead(not_null<const DocumentData*> document);
+	void requestPollViewRepaint(not_null<const PollData*> poll);
 
 	not_null<PhotoData*> photo(PhotoId id);
 	not_null<PhotoData*> photo(const MTPPhoto &data);
@@ -261,14 +265,17 @@ public:
 	void photoConvert(
 		not_null<PhotoData*> original,
 		const MTPPhoto &data);
-	PhotoData *photoFromWeb(const MTPWebDocument &data, ImagePtr thumb);
+	PhotoData *photoFromWeb(
+		const MTPWebDocument &data,
+		ImagePtr thumb = ImagePtr(),
+		bool willBecomeNormal = false);
 
 	not_null<DocumentData*> document(DocumentId id);
 	not_null<DocumentData*> document(const MTPDocument &data);
 	not_null<DocumentData*> document(const MTPDdocument &data);
 	not_null<DocumentData*> document(
 		const MTPdocument &data,
-		const QPixmap &thumb);
+		QImage &&thumb);
 	not_null<DocumentData*> document(
 		DocumentId id,
 		const uint64 &access,
@@ -297,7 +304,7 @@ public:
 		const TextWithEntities &content);
 	not_null<WebPageData*> webpage(
 		WebPageId id,
-		const QString &type,
+		WebPageType type,
 		const QString &url,
 		const QString &displayUrl,
 		const QString &siteName,
@@ -305,6 +312,7 @@ public:
 		const TextWithEntities &description,
 		PhotoData *photo,
 		DocumentData *document,
+		WebPageCollage &&collage,
 		int duration,
 		const QString &author,
 		TimeId pendingTill);
@@ -322,6 +330,13 @@ public:
 	void gameConvert(
 		not_null<GameData*> original,
 		const MTPGame &data);
+
+	not_null<PollData*> poll(PollId id);
+	not_null<PollData*> poll(const MTPPoll &data);
+	not_null<PollData*> poll(const MTPDmessageMediaPoll &data);
+	void applyPollUpdate(const MTPDupdateMessagePoll &update);
+
+	not_null<LocationData*> location(const LocationCoords &coords);
 
 	void registerPhotoItem(
 		not_null<const PhotoData*> photo,
@@ -353,6 +368,12 @@ public:
 	void unregisterGameView(
 		not_null<const GameData*> game,
 		not_null<ViewElement*> view);
+	void registerPollView(
+		not_null<const PollData*> poll,
+		not_null<ViewElement*> view);
+	void unregisterPollView(
+		not_null<const PollData*> poll,
+		not_null<ViewElement*> view);
 	void registerContactView(
 		UserId contactId,
 		not_null<ViewElement*> view);
@@ -377,7 +398,9 @@ public:
 
 	void notifyWebPageUpdateDelayed(not_null<WebPageData*> page);
 	void notifyGameUpdateDelayed(not_null<GameData*> game);
-	void sendWebPageGameNotifications();
+	void notifyPollUpdateDelayed(not_null<PollData*> poll);
+	bool hasPendingWebPageGamePollNotification() const;
+	void sendWebPageGamePollNotifications();
 
 	void stopAutoplayAnimations();
 
@@ -407,14 +430,15 @@ public:
 	bool notifySettingsUnknown(not_null<const PeerData*> peer) const;
 	rpl::producer<> defaultUserNotifyUpdates() const;
 	rpl::producer<> defaultChatNotifyUpdates() const;
+	rpl::producer<> defaultBroadcastNotifyUpdates() const;
 	rpl::producer<> defaultNotifyUpdates(
 		not_null<const PeerData*> peer) const;
 
 	void serviceNotification(
 		const TextWithEntities &message,
 		const MTPMessageMedia &media = MTP_messageMediaEmpty());
-
-	void forgetMedia();
+	void checkNewAuthorization();
+	rpl::producer<> newAuthorizationChecks() const;
 
 	void setMimeForwardIds(MessageIdsList &&list);
 	MessageIdsList takeMimeForwardIds();
@@ -478,7 +502,7 @@ private:
 		const MTPDwebPage &data);
 	void webpageApplyFields(
 		not_null<WebPageData*> page,
-		const QString &type,
+		WebPageType type,
 		const QString &url,
 		const QString &displayUrl,
 		const QString &siteName,
@@ -486,6 +510,7 @@ private:
 		const TextWithEntities &description,
 		PhotoData *photo,
 		DocumentData *document,
+		WebPageCollage &&collage,
 		int duration,
 		const QString &author,
 		TimeId pendingTill);
@@ -600,11 +625,20 @@ private:
 		not_null<const WebPageData*>,
 		base::flat_set<not_null<ViewElement*>>> _webpageViews;
 	std::unordered_map<
+		LocationCoords,
+		std::unique_ptr<LocationData>> _locations;
+	std::unordered_map<
+		PollId,
+		std::unique_ptr<PollData>> _polls;
+	std::unordered_map<
 		GameId,
 		std::unique_ptr<GameData>> _games;
 	std::map<
 		not_null<const GameData*>,
 		base::flat_set<not_null<ViewElement*>>> _gameViews;
+	std::map<
+		not_null<const PollData*>,
+		base::flat_set<not_null<ViewElement*>>> _pollViews;
 	std::map<
 		UserId,
 		base::flat_set<not_null<HistoryItem*>>> _contactItems;
@@ -617,6 +651,7 @@ private:
 
 	base::flat_set<not_null<WebPageData*>> _webpagesUpdated;
 	base::flat_set<not_null<GameData*>> _gamesUpdated;
+	base::flat_set<not_null<PollData*>> _pollsUpdated;
 
 	std::deque<Dialogs::Key> _pinnedDialogs;
 	base::flat_map<FeedId, std::unique_ptr<Feed>> _feeds;
@@ -630,8 +665,10 @@ private:
 
 	NotifySettings _defaultUserNotifySettings;
 	NotifySettings _defaultChatNotifySettings;
+	NotifySettings _defaultBroadcastNotifySettings;
 	rpl::event_stream<> _defaultUserNotifyUpdates;
 	rpl::event_stream<> _defaultChatNotifyUpdates;
+	rpl::event_stream<> _defaultBroadcastNotifyUpdates;
 	std::unordered_set<not_null<const PeerData*>> _mutedPeers;
 	base::Timer _unmuteByFinishedTimer;
 
@@ -641,6 +678,8 @@ private:
 		const Passport::SavedCredentials,
 		int>;
 	std::unique_ptr<CredentialsWithGeneration> _passportCredentials;
+
+	rpl::event_stream<> _newAuthorizationChecks;
 
 	rpl::lifetime _lifetime;
 

@@ -1,4 +1,7 @@
 <RCC>
   <qresource prefix="/qt">
   </qresource>
+  <qresource prefix="/fc">
+    <file alias="fc-custom.conf">../fc-custom.conf</file>
+  </qresource>
 </RCC>

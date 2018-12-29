@@ -86,6 +86,8 @@
       'AL_ALEXT_PROTOTYPES',
       'TGVOIP_USE_CXX11_LIB',
       'XXH_INLINE_ALL',
+      'TDESKTOP_API_ID=<(api_id)',
+      'TDESKTOP_API_HASH=<(api_hash)',
       '<!@(%%PYTHON_CMD%% -c "for s in \'<(build_defines)\'.split(\',\'): print(s)")',
     ],
 
@@ -116,7 +118,7 @@
     'conditions': [
       [ '"<(official_build_target)" != ""', {
         'defines': [
-          'CUSTOM_API_ID',
+          'TDESKTOP_OFFICIAL_TARGET=<(official_build_target)',
         ],
         'dependencies': [
           'utils.gyp:Packer',

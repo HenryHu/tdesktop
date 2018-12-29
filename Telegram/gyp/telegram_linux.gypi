@@ -55,7 +55,6 @@
       'minizip',
       'opus',
       'z',
-#      '<!(pkg-config 2> /dev/null --libs <@(pkgconfig_libs))',
     ],
     'cflags_cc': [
       '-Wno-strict-overflow',
@@ -93,6 +92,16 @@
         'cflags_cc': [
           '<!(pkg-config 2> /dev/null --cflags gtk+-3.0)',
         ],
+      }], ['<!(pkg-config ayatana-appindicator3-0.1; echo $?) == 0', {
+        'cflags_cc': [ '<!(pkg-config --cflags ayatana-appindicator3-0.1)' ],
+        'defines': [ 'TDESKTOP_USE_AYATANA_INDICATORS' ],
+      }], ['<!(pkg-config ayatana-appindicator-0.1; echo $?) == 0', {
+        'cflags_cc': [ '<!(pkg-config --cflags ayatana-appindicator-0.1)' ],
+        'defines': [ 'TDESKTOP_USE_AYATANA_INDICATORS' ],
+      }], ['<!(pkg-config appindicator3-0.1; echo $?) == 0', {
+        'cflags_cc': [ '<!(pkg-config --cflags appindicator3-0.1)' ],
+      }], ['<!(pkg-config appindicator-0.1; echo $?) == 0', {
+        'cflags_cc': [ '<!(pkg-config --cflags appindicator-0.1)' ],
       }]
     ],
   }]],

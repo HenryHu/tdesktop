@@ -11,7 +11,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 extern "C" {
 #undef signals
 #ifdef HAVE_APPINDICATOR
+#ifdef TDESKTOP_USE_AYATANA_INDICATORS
+#include <libayatana-appindicator/app-indicator.h>
+#else
 #include <libappindicator/app-indicator.h>
+#endif
 #endif
 #include <gtk/gtk.h>
 #include <gdk/gdk.h>
