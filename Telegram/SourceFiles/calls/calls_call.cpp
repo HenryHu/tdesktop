@@ -17,6 +17,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/connection.h"
 #include "media/media_audio_track.h"
 #include "calls/calls_panel.h"
+#include "data/data_user.h"
+#include "data/data_session.h"
 
 #ifdef slots
 #undef slots
@@ -174,7 +176,8 @@ void Call::start(bytes::const_span random) {
 		} else {
 			startIncoming();
 		}
-	} else if (_state == State::ExchangingKeys && _answerAfterDhConfigReceived) {
+	} else if (_state == State::ExchangingKeys
+		&& _answerAfterDhConfigReceived) {
 		answer();
 	}
 }
@@ -199,7 +202,7 @@ void Call::startOutgoing() {
 		setState(State::Waiting);
 
 		auto &call = result.c_phone_phoneCall();
-		App::feedUsers(call.vusers);
+		Auth().data().processUsers(call.vusers);
 		if (call.vphone_call.type() != mtpc_phoneCallWaiting) {
 			LOG(("Call Error: Expected phoneCallWaiting in response to phone.requestCall()"));
 			finish(FinishType::Failed);
@@ -271,7 +274,7 @@ void Call::actuallyAnswer() {
 	)).done([this](const MTPphone_PhoneCall &result) {
 		Expects(result.type() == mtpc_phone_phoneCall);
 		auto &call = result.c_phone_phoneCall();
-		App::feedUsers(call.vusers);
+		Auth().data().processUsers(call.vusers);
 		if (call.vphone_call.type() != mtpc_phoneCallWaiting) {
 			LOG(("Call Error: Expected phoneCallWaiting in response to phone.acceptCall()"));
 			finish(FinishType::Failed);
@@ -409,7 +412,9 @@ bool Call::handleUpdate(const MTPPhoneCall &call) {
 		if (data.vid.v != _id) {
 			return false;
 		}
-		if (_type == Type::Incoming && _state == State::ExchangingKeys) {
+		if (_type == Type::Incoming
+			&& _state == State::ExchangingKeys
+			&& !_controller) {
 			startConfirmedCall(data);
 		}
 	} return true;
@@ -483,8 +488,9 @@ void Call::confirmAcceptedCall(const MTPDphoneCallAccepted &call) {
 			MTP_int(tgvoip::VoIPController::GetConnectionMaxLayer()))
 	)).done([this](const MTPphone_PhoneCall &result) {
 		Expects(result.type() == mtpc_phone_phoneCall);
+
 		auto &call = result.c_phone_phoneCall();
-		App::feedUsers(call.vusers);
+		Auth().data().processUsers(call.vusers);
 		if (call.vphone_call.type() != mtpc_phoneCall) {
 			LOG(("Call Error: Expected phoneCall in response to phone.confirmCall()"));
 			finish(FinishType::Failed);
@@ -536,6 +542,7 @@ void Call::createAndStartController(const MTPDphoneCall &call) {
 #endif // Q_OS_MAC
 	config.enableNS = true;
 	config.enableAGC = true;
+	config.enableVolumeControl = true;
 	config.initTimeout = Global::CallConnectTimeoutMs() / 1000;
 	config.recvTimeout = Global::CallPacketTimeoutMs() / 1000;
 	if (Logs::DebugEnabled()) {
@@ -584,6 +591,13 @@ void Call::createAndStartController(const MTPDphoneCall &call) {
 		call.is_p2p_allowed(),
 		protocol.vmax_layer.v);
 	_controller->SetConfig(config);
+	_controller->SetCurrentAudioOutput(Global::CallOutputDeviceID().toStdString());
+	_controller->SetCurrentAudioInput(Global::CallInputDeviceID().toStdString());
+	_controller->SetOutputVolume(Global::CallOutputVolume()/100.0f);
+	_controller->SetInputVolume(Global::CallInputVolume()/100.0f);
+#ifdef Q_OS_MAC
+	_controller->SetAudioOutputDuckingEnabled(Global::CallAudioDuckingEnabled());
+#endif
 	_controller->SetEncryptionKey(reinterpret_cast<char*>(_authKey.data()), (_type == Type::Outgoing));
 	_controller->SetCallbacks(callbacks);
 	if (Global::UseProxyForCalls()
@@ -748,6 +762,34 @@ void Call::setState(State state) {
 	}
 }
 
+void Call::setCurrentAudioDevice(bool input, std::string deviceID){
+	if (_controller) {
+		if (input) {
+			_controller->SetCurrentAudioInput(deviceID);
+		} else {
+			_controller->SetCurrentAudioOutput(deviceID);
+		}
+	}
+}
+
+void Call::setAudioVolume(bool input, float level){
+	if (_controller) {
+		if(input) {
+			_controller->SetInputVolume(level);
+		} else {
+			_controller->SetOutputVolume(level);
+		}
+	}
+}
+
+void Call::setAudioDuckingEnabled(bool enabled){
+#ifdef Q_OS_MAC
+	if (_controller) {
+		_controller->SetAudioOutputDuckingEnabled(enabled);
+	}
+#endif
+}
+
 void Call::finish(FinishType type, const MTPPhoneCallDiscardReason &reason) {
 	Expects(type != FinishType::None);
 
@@ -841,7 +883,7 @@ Call::~Call() {
 	destroyController();
 }
 
-void UpdateConfig(const std::map<std::string, std::string> &data) {
+void UpdateConfig(const std::string& data) {
 	tgvoip::ServerConfig::GetSharedInstance()->Update(data);
 }
 

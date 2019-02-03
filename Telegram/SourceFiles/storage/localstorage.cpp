@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/storage_clear_legacy.h"
 #include "chat_helpers/stickers.h"
 #include "data/data_drafts.h"
+#include "data/data_user.h"
 #include "boxes/send_files_box.h"
 #include "window/themes/window_theme.h"
 #include "ui/widgets/input_fields.h"
@@ -27,8 +28,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_cloud_manager.h"
 #include "media/media_audio.h"
 #include "mtproto/dc_options.h"
-#include "messenger.h"
-#include "application.h"
+#include "core/application.h"
 #include "apiwrap.h"
 #include "auth_session.h"
 #include "window/window_controller.h"
@@ -47,6 +47,12 @@ constexpr auto kThemeFileSizeLimit = 5 * 1024 * 1024;
 constexpr auto kFileLoaderQueueStopTimeout = TimeMs(5000);
 constexpr auto kDefaultStickerInstallDate = TimeId(1);
 constexpr auto kProxyTypeShift = 1024;
+constexpr auto kWriteMapTimeout = TimeMs(1000);
+constexpr auto kSavedBackgroundFormat = QImage::Format_ARGB32_Premultiplied;
+
+constexpr auto kWallPaperLegacySerializeTagId = int32(-111);
+constexpr auto kWallPaperSerializeTagId = int32(-112);
+constexpr auto kWallPaperSidesLimit = 10'000;
 
 constexpr auto kSinglePeerTypeUser = qint32(1);
 constexpr auto kSinglePeerTypeChat = qint32(2);
@@ -566,7 +572,7 @@ enum {
 	dbiIncludeMutedOld = 0x31,
 	dbiMegagroupSizeMax = 0x32,
 	dbiDownloadPath = 0x33,
-	dbiAutoDownload = 0x34,
+	dbiAutoDownloadOld = 0x34,
 	dbiSavedGifsLimit = 0x35,
 	dbiShowingSavedGifsOld = 0x36,
 	dbiAutoPlay = 0x37,
@@ -601,6 +607,7 @@ enum {
 	dbiScalePercent = 0x58,
 	dbiPlaybackSpeed = 0x59,
 	dbiLanguagesKey = 0x5a,
+	dbiCallSettings = 0x5b,
 
 	dbiEncryptedWithSalt = 333,
 	dbiEncrypted = 444,
@@ -879,10 +886,47 @@ struct ReadSettingsContext {
 };
 
 void applyReadContext(ReadSettingsContext &&context) {
-	Messenger::Instance().dcOptions()->addFromOther(std::move(context.dcOptions));
+	Core::App().dcOptions()->addFromOther(std::move(context.dcOptions));
 	if (context.legacyLanguageId != Lang::kLegacyLanguageNone) {
 		Lang::Current().fillFromLegacy(context.legacyLanguageId, context.legacyLanguageFile);
 		writeLangPack();
+	}
+}
+
+QByteArray serializeCallSettings(){
+	QByteArray result=QByteArray();
+	uint32 size = 3*sizeof(qint32) + Serialize::stringSize(Global::CallOutputDeviceID()) + Serialize::stringSize(Global::CallInputDeviceID());
+	result.reserve(size);
+	QDataStream stream(&result, QIODevice::WriteOnly);
+	stream.setVersion(QDataStream::Qt_5_1);
+	stream << Global::CallOutputDeviceID();
+	stream << qint32(Global::CallOutputVolume());
+	stream << Global::CallInputDeviceID();
+	stream << qint32(Global::CallInputVolume());
+	stream << qint32(Global::CallAudioDuckingEnabled() ? 1 : 0);
+	return result;
+}
+
+void deserializeCallSettings(QByteArray& settings){
+	QDataStream stream(&settings, QIODevice::ReadOnly);
+	stream.setVersion(QDataStream::Qt_5_1);
+	QString outputDeviceID;
+	QString inputDeviceID;
+	qint32 outputVolume;
+	qint32 inputVolume;
+	qint32 duckingEnabled;
+
+	stream >> outputDeviceID;
+	stream >> outputVolume;
+	stream >> inputDeviceID;
+	stream >> inputVolume;
+	stream >> duckingEnabled;
+	if(_checkStreamStatus(stream)){
+		Global::SetCallOutputDeviceID(outputDeviceID);
+		Global::SetCallOutputVolume(outputVolume);
+		Global::SetCallInputDeviceID(inputDeviceID);
+		Global::SetCallInputVolume(inputVolume);
+		Global::SetCallAudioDuckingEnabled(duckingEnabled);
 	}
 }
 
@@ -972,8 +1016,8 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 		if (!_checkStreamStatus(stream)) return false;
 
 		DEBUG_LOG(("MTP Info: user found, dc %1, uid %2").arg(dcId).arg(userId));
-		Messenger::Instance().setMtpMainDcId(dcId);
-		Messenger::Instance().setAuthSessionUserId(userId);
+		Core::App().setMtpMainDcId(dcId);
+		Core::App().setAuthSessionUserId(userId);
 	} break;
 
 	case dbiKey: {
@@ -982,7 +1026,7 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 		auto key = Serialize::read<MTP::AuthKey::Data>(stream);
 		if (!_checkStreamStatus(stream)) return false;
 
-		Messenger::Instance().setMtpKey(dcId, key);
+		Core::App().setMtpKey(dcId, key);
 	} break;
 
 	case dbiMtpAuthorization: {
@@ -990,7 +1034,7 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 		stream >> serialized;
 		if (!_checkStreamStatus(stream)) return false;
 
-		Messenger::Instance().setMtpAuthorization(serialized);
+		Core::App().setMtpAuthorization(serialized);
 	} break;
 
 	case dbiAutoStart: {
@@ -1057,14 +1101,31 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 		Global::SetSoundNotify(v == 1);
 	} break;
 
-	case dbiAutoDownload: {
+	case dbiAutoDownloadOld: {
 		qint32 photo, audio, gif;
 		stream >> photo >> audio >> gif;
 		if (!_checkStreamStatus(stream)) return false;
 
-		cSetAutoDownloadPhoto(photo);
-		cSetAutoDownloadAudio(audio);
-		cSetAutoDownloadGif(gif);
+		using namespace Data::AutoDownload;
+		auto &settings = GetStoredAuthSessionCache().autoDownload();
+		const auto disabled = [](qint32 value, qint32 mask) {
+			return (value & mask) != 0;
+		};
+		const auto set = [&](Type type, qint32 value) {
+			constexpr auto kNoPrivate = qint32(0x01);
+			constexpr auto kNoGroups = qint32(0x02);
+			if (disabled(value, kNoPrivate)) {
+				settings.setBytesLimit(Source::User, type, 0);
+			}
+			if (disabled(value, kNoGroups)) {
+				settings.setBytesLimit(Source::Group, type, 0);
+				settings.setBytesLimit(Source::Channel, type, 0);
+			}
+		};
+		set(Type::Photo, photo);
+		set(Type::VoiceMessage, audio);
+		set(Type::GIF, gif);
+		set(Type::VideoMessage, gif);
 	} break;
 
 	case dbiAutoPlay: {
@@ -1227,7 +1288,7 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 		} else {
 			Global::SetProxiesList({});
 		}
-		Sandbox::refreshGlobalProxy();
+		Core::App().refreshGlobalProxy();
 	} break;
 
 	case dbiConnectionType: {
@@ -1327,7 +1388,7 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 				Global::SetProxySettings(ProxyData::Settings::System);
 			}
 		}
-		Sandbox::refreshGlobalProxy();
+		Core::App().refreshGlobalProxy();
 	} break;
 
 	case dbiThemeKeyOld: {
@@ -1769,6 +1830,14 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 		Global::SetVoiceMsgPlaybackDoubled(v == 2);
 	} break;
 
+	case dbiCallSettings: {
+		QByteArray callSettings;
+		stream >> callSettings;
+		if(!_checkStreamStatus(stream)) return false;
+
+		deserializeCallSettings(callSettings);
+	} break;
+
 	default:
 	LOG(("App Error: unknown blockId in _readSetting: %1").arg(blockId));
 	return false;
@@ -1981,10 +2050,11 @@ void _writeUserSettings() {
 	}
 	auto userDataInstance = StoredAuthSessionCache
 		? StoredAuthSessionCache.get()
-		: Messenger::Instance().getAuthSessionSettings();
+		: Core::App().getAuthSessionSettings();
 	auto userData = userDataInstance
 		? userDataInstance->serialize()
 		: QByteArray();
+	auto callSettings = serializeCallSettings();
 
 	uint32 size = 23 * (sizeof(quint32) + sizeof(qint32));
 	size += sizeof(quint32) + Serialize::stringSize(Global::AskDownloadPath() ? QString() : Global::DownloadPath()) + Serialize::bytearraySize(Global::AskDownloadPath() ? QByteArray() : Global::DownloadPathBookmark());
@@ -2007,6 +2077,7 @@ void _writeUserSettings() {
 	if (!userData.isEmpty()) {
 		size += sizeof(quint32) + Serialize::bytearraySize(userData);
 	}
+	size += sizeof(quint32) + Serialize::bytearraySize(callSettings);
 
 	EncryptedDescriptor data(size);
 	data.stream
@@ -2029,7 +2100,6 @@ void _writeUserSettings() {
 	data.stream << quint32(dbiDialogLastPath) << cDialogLastPath();
 	data.stream << quint32(dbiSongVolume) << qint32(qRound(Global::SongVolume() * 1e6));
 	data.stream << quint32(dbiVideoVolume) << qint32(qRound(Global::VideoVolume() * 1e6));
-	data.stream << quint32(dbiAutoDownload) << qint32(cAutoDownloadPhoto()) << qint32(cAutoDownloadAudio()) << qint32(cAutoDownloadGif());
 	data.stream << quint32(dbiDialogsMode) << qint32(Global::DialogsModeEnabled() ? 1 : 0) << static_cast<qint32>(Global::DialogsMode());
 	data.stream << quint32(dbiModerateMode) << qint32(Global::ModerateModeEnabled() ? 1 : 0);
 	data.stream << quint32(dbiAutoPlay) << qint32(cAutoPlayGif() ? 1 : 0);
@@ -2057,6 +2127,7 @@ void _writeUserSettings() {
 	if (!Global::HiddenPinnedMessages().isEmpty()) {
 		data.stream << quint32(dbiHiddenPinnedMessages) << Global::HiddenPinnedMessages();
 	}
+	data.stream << qint32(dbiCallSettings) << callSettings;
 
 	FileWriteDescriptor file(_userSettingsKey);
 	file.writeEncrypted(data);
@@ -2102,7 +2173,7 @@ void _writeMtpData() {
 		return;
 	}
 
-	auto mtpAuthorizationSerialized = Messenger::Instance().serializeMtpAuthorization();
+	auto mtpAuthorizationSerialized = Core::App().serializeMtpAuthorization();
 
 	quint32 size = sizeof(quint32) + Serialize::bytearraySize(mtpAuthorizationSerialized);
 
@@ -2336,7 +2407,7 @@ ReadMapState _readMap(const QByteArray &pass) {
 	_readMtpData();
 
 	DEBUG_LOG(("selfSerialized set: %1").arg(selfSerialized.size()));
-	Messenger::Instance().setAuthSessionFromStorage(
+	Core::App().setAuthSessionFromStorage(
 		std::move(StoredAuthSessionCache),
 		std::move(selfSerialized),
 		_oldMapVersion);
@@ -2574,7 +2645,7 @@ void writeSettings() {
 	}
 	settings.writeData(_settingsSalt);
 
-	auto dcOptionsSerialized = Messenger::Instance().dcOptions()->serialize();
+	auto dcOptionsSerialized = Core::App().dcOptions()->serialize();
 
 	quint32 size = 12 * (sizeof(quint32) + sizeof(qint32));
 	size += sizeof(quint32) + Serialize::bytearraySize(dcOptionsSerialized);
@@ -3687,6 +3758,7 @@ void importOldRecentStickers() {
 			attributes,
 			mime,
 			ImagePtr(),
+			ImagePtr(),
 			dc,
 			size,
 			StorageImageLocation());
@@ -3890,7 +3962,7 @@ void readSavedGifs() {
 	}
 }
 
-void writeBackground(int32 id, const QImage &img) {
+void writeBackground(const Data::WallPaper &paper, const QImage &image) {
 	if (!_working() || !_backgroundCanWrite) {
 		return;
 	}
@@ -3903,11 +3975,33 @@ void writeBackground(int32 id, const QImage &img) {
 	auto &backgroundKey = Window::Theme::IsNightMode()
 		? _backgroundKeyNight
 		: _backgroundKeyDay;
-	QByteArray bmp;
-	if (!img.isNull()) {
-		QBuffer buf(&bmp);
-		if (!img.save(&buf, "BMP")) {
-			return;
+	auto imageData = QByteArray();
+	if (!image.isNull()) {
+		const auto width = qint32(image.width());
+		const auto height = qint32(image.height());
+		const auto perpixel = (image.depth() >> 3);
+		const auto srcperline = image.bytesPerLine();
+		const auto srcsize = srcperline * height;
+		const auto dstperline = width * perpixel;
+		const auto dstsize = dstperline * height;
+		const auto copy = (image.format() != kSavedBackgroundFormat)
+			? image.convertToFormat(kSavedBackgroundFormat)
+			: image;
+		imageData.resize(2 * sizeof(qint32) + dstsize);
+
+		auto dst = bytes::make_detached_span(imageData);
+		bytes::copy(dst, bytes::object_as_span(&width));
+		dst = dst.subspan(sizeof(qint32));
+		bytes::copy(dst, bytes::object_as_span(&height));
+		dst = dst.subspan(sizeof(qint32));
+		const auto src = bytes::make_span(image.constBits(), srcsize);
+		if (srcsize == dstsize) {
+			bytes::copy(dst, src);
+		} else {
+			for (auto y = 0; y != height; ++y) {
+				bytes::copy(dst, src.subspan(y * srcperline, dstperline));
+				dst = dst.subspan(dstperline);
+			}
 		}
 	}
 	if (!backgroundKey) {
@@ -3915,11 +4009,15 @@ void writeBackground(int32 id, const QImage &img) {
 		_mapChanged = true;
 		_writeMap(WriteMapWhen::Fast);
 	}
+	const auto serialized = paper.serialize();
 	quint32 size = sizeof(qint32)
-		+ sizeof(quint32)
-		+ (bmp.isEmpty() ? 0 : (sizeof(quint32) + bmp.size()));
+		+ Serialize::bytearraySize(serialized)
+		+ Serialize::bytearraySize(imageData);
 	EncryptedDescriptor data(size);
-	data.stream << qint32(id) << bmp;
+	data.stream
+		<< qint32(kWallPaperSerializeTagId)
+		<< serialized
+		<< imageData;
 
 	FileWriteDescriptor file(backgroundKey);
 	file.writeEncrypted(data);
@@ -3940,38 +4038,103 @@ bool readBackground() {
 		return false;
 	}
 
-	QByteArray bmpData;
-	qint32 id;
-	bg.stream >> id >> bmpData;
-	auto oldEmptyImage = (bg.stream.status() != QDataStream::Ok);
-	if (oldEmptyImage
-		|| id == Window::Theme::kInitialBackground
-		|| id == Window::Theme::kDefaultBackground) {
+	qint32 legacyId = 0;
+	bg.stream >> legacyId;
+	const auto paper = [&] {
+		if (legacyId == kWallPaperLegacySerializeTagId) {
+			quint64 id = 0;
+			quint64 accessHash = 0;
+			quint32 flags = 0;
+			QString slug;
+			bg.stream
+				>> id
+				>> accessHash
+				>> flags
+				>> slug;
+			return Data::WallPaper::FromLegacySerialized(
+				id,
+				accessHash,
+				flags,
+				slug);
+		} else if (legacyId == kWallPaperSerializeTagId) {
+			QByteArray serialized;
+			bg.stream >> serialized;
+			return Data::WallPaper::FromSerialized(serialized);
+		} else {
+			return Data::WallPaper::FromLegacyId(legacyId);
+		}
+	}();
+	if (bg.stream.status() != QDataStream::Ok || !paper) {
+		return false;
+	}
+
+	QByteArray imageData;
+	bg.stream >> imageData;
+	const auto isOldEmptyImage = (bg.stream.status() != QDataStream::Ok);
+	if (isOldEmptyImage
+		|| Data::IsLegacy1DefaultWallPaper(*paper)
+		|| Data::IsDefaultWallPaper(*paper)) {
 		_backgroundCanWrite = false;
-		if (oldEmptyImage || bg.version < 8005) {
-			Window::Theme::Background()->setImage(Window::Theme::kDefaultBackground);
+		if (isOldEmptyImage || bg.version < 8005) {
+			Window::Theme::Background()->set(Data::DefaultWallPaper());
 			Window::Theme::Background()->setTile(false);
 		} else {
-			Window::Theme::Background()->setImage(id);
+			Window::Theme::Background()->set(*paper);
 		}
 		_backgroundCanWrite = true;
 		return true;
-	} else if (id == Window::Theme::kThemeBackground && bmpData.isEmpty()) {
+	} else if (Data::IsThemeWallPaper(*paper) && imageData.isEmpty()) {
 		_backgroundCanWrite = false;
-		Window::Theme::Background()->setImage(id);
+		Window::Theme::Background()->set(*paper);
 		_backgroundCanWrite = true;
 		return true;
 	}
-
-	QImage image;
-	QBuffer buf(&bmpData);
-	QImageReader reader(&buf);
+	auto image = QImage();
+	if (legacyId == kWallPaperSerializeTagId) {
+		const auto perpixel = 4;
+		auto src = bytes::make_span(imageData);
+		auto width = qint32();
+		auto height = qint32();
+		if (src.size() > 2 * sizeof(qint32)) {
+			bytes::copy(
+				bytes::object_as_span(&width),
+				src.subspan(0, sizeof(qint32)));
+			src = src.subspan(sizeof(qint32));
+			bytes::copy(
+				bytes::object_as_span(&height),
+				src.subspan(0, sizeof(qint32)));
+			src = src.subspan(sizeof(qint32));
+			if (width + height <= kWallPaperSidesLimit
+				&& src.size() == width * height * perpixel) {
+				image = QImage(
+					width,
+					height,
+					QImage::Format_ARGB32_Premultiplied);
+				if (!image.isNull()) {
+					const auto srcperline = width * perpixel;
+					const auto srcsize = srcperline * height;
+					const auto dstperline = image.bytesPerLine();
+					const auto dstsize = dstperline * height;
+					Assert(srcsize == dstsize);
+					bytes::copy(
+						bytes::make_span(image.bits(), dstsize),
+						src);
+				}
+			}
+		}
+	} else {
+		auto buffer = QBuffer(&imageData);
+		auto reader = QImageReader(&buffer);
 #ifndef OS_MAC_OLD
-	reader.setAutoTransform(true);
+		reader.setAutoTransform(true);
 #endif // OS_MAC_OLD
-	if (reader.read(&image)) {
+		if (!reader.read(&image)) {
+			image = QImage();
+		}
+	}
+	if (!image.isNull() || paper->backgroundColor()) {
 		_backgroundCanWrite = false;
-		Window::Theme::Background()->setImage(id, std::move(image));
+		Window::Theme::Background()->set(*paper, std::move(image));
 		_backgroundCanWrite = true;
 		return true;
 	}
@@ -4948,7 +5111,7 @@ Manager::Manager() {
 
 void Manager::writeMap(bool fast) {
 	if (!_mapWriteTimer.isActive() || fast) {
-		_mapWriteTimer.start(fast ? 1 : WriteMapTimeout);
+		_mapWriteTimer.start(fast ? 1 : kWriteMapTimeout);
 	} else if (_mapWriteTimer.remainingTime() <= 0) {
 		mapWriteTimeout();
 	}
@@ -4960,7 +5123,7 @@ void Manager::writingMap() {
 
 void Manager::writeLocations(bool fast) {
 	if (!_locationsWriteTimer.isActive() || fast) {
-		_locationsWriteTimer.start(fast ? 1 : WriteMapTimeout);
+		_locationsWriteTimer.start(fast ? 1 : kWriteMapTimeout);
 	} else if (_locationsWriteTimer.remainingTime() <= 0) {
 		locationsWriteTimeout();
 	}

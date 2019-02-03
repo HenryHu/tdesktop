@@ -329,11 +329,11 @@ QString SystemCountry() {
 }
 
 bool IsApplicationActive() {
-	return static_cast<QApplication*>(QApplication::instance())->activeWindow() != nullptr;
+	return QApplication::activeWindow() != nullptr;
 }
 
 void SetApplicationIcon(const QIcon &icon) {
-	qApp->setWindowIcon(icon);
+	QApplication::setWindowIcon(icon);
 }
 
 QString CurrentExecutablePath(int argc, char *argv[]) {
@@ -652,24 +652,26 @@ void RequestPermission(PermissionType type, Fn<void(PermissionStatus)> resultCal
 }
 
 void OpenSystemSettingsForPermission(PermissionType type) {
-	if (type==PermissionType::Microphone) {
-		ShellExecute(NULL, L"open", L"ms-settings:privacy-microphone", NULL, NULL, SW_SHOWDEFAULT);
+	if (type == PermissionType::Microphone) {
+		crl::on_main([] {
+			ShellExecute(
+				nullptr,
+				L"open",
+				L"ms-settings:privacy-microphone",
+				nullptr,
+				nullptr,
+				SW_SHOWDEFAULT);
+		});
 	}
 }
 
-bool NativeEventNestsLoop(void *message) {
-	const auto code = static_cast<const MSG*>(message)->message;
-	if (code > WM_NULL && code <= WM_GETMINMAXINFO) {
-		return true;
-	} else if (code >= WM_NCCREATE && code <= WM_NCXBUTTONDBLCLK) {
-		return true;
-	} else if (code == WM_WINDOWPOSCHANGING
-		|| code == WM_WINDOWPOSCHANGED
-		|| code == WM_STYLECHANGING
-		|| code == WM_STYLECHANGED) {
-		return true;
+bool OpenSystemSettings(SystemSettingsType type) {
+	if (type == SystemSettingsType::Audio) {
+		crl::on_main([] {
+			WinExec("control.exe mmsys.cpl", SW_SHOW);
+		});
 	}
-	return false;
+	return true;
 }
 
 } // namespace Platform

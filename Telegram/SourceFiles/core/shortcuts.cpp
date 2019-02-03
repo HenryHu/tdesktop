@@ -9,7 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "mainwindow.h"
 #include "mainwidget.h"
-#include "messenger.h"
+#include "core/application.h"
 #include "media/player/media_player_instance.h"
 #include "platform/platform_specific.h"
 #include "base/parse_helper.h"
@@ -26,6 +26,8 @@ const auto AutoRepeatCommands = base::flat_set<Command>{
 	Command::MediaNext,
 	Command::ChatPrevious,
 	Command::ChatNext,
+	Command::ChatFirst,
+	Command::ChatLast,
 };
 
 const auto MediaCommands = base::flat_set<Command>{
@@ -41,6 +43,8 @@ const auto SupportCommands = base::flat_set<Command>{
 	Command::SupportReloadTemplates,
 	Command::SupportToggleMuted,
 	Command::SupportScrollToCurrent,
+	Command::SupportHistoryBack,
+	Command::SupportHistoryForward,
 };
 
 const auto CommandByName = base::flat_map<QString, Command>{
@@ -308,6 +312,14 @@ void Manager::fillDefaults() {
 	set(qsl("f5"), Command::SupportReloadTemplates);
 	set(qsl("ctrl+delete"), Command::SupportToggleMuted);
 	set(qsl("ctrl+insert"), Command::SupportScrollToCurrent);
+	set(qsl("ctrl+shift+x"), Command::SupportHistoryBack);
+	set(qsl("ctrl+shift+c"), Command::SupportHistoryForward);
+
+	set(qsl("ctrl+1"), Command::ChatPinned1);
+	set(qsl("ctrl+2"), Command::ChatPinned2);
+	set(qsl("ctrl+3"), Command::ChatPinned3);
+	set(qsl("ctrl+4"), Command::ChatPinned4);
+	set(qsl("ctrl+5"), Command::ChatPinned5);
 }
 
 void Manager::writeDefaultFile() {
@@ -359,11 +371,11 @@ void Manager::set(const QString &keys, Command command) {
 	}
 	auto shortcut = base::make_unique_q<QShortcut>(
 		result,
-		Messenger::Instance().getActiveWindow(),
+		Core::App().getActiveWindow(),
 		nullptr,
 		nullptr,
 		Qt::ApplicationShortcut);
-	if (AutoRepeatCommands.contains(command)) {
+	if (!AutoRepeatCommands.contains(command)) {
 		shortcut->setAutoRepeat(false);
 	}
 	const auto isMediaShortcut = MediaCommands.contains(command);
