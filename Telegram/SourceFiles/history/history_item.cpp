@@ -17,7 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_service.h"
 #include "history/history_message.h"
 #include "history/history.h"
-#include "media/media_clip_reader.h"
+#include "media/clip/media_clip_reader.h"
 #include "ui/effects/ripple_animation.h"
 #include "ui/text_options.h"
 #include "storage/file_upload.h"
@@ -26,7 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/storage_feed_messages.h"
 #include "auth_session.h"
 #include "apiwrap.h"
-#include "media/media_audio.h"
+#include "media/audio/media_audio.h"
 #include "core/application.h"
 #include "mainwindow.h"
 #include "window/window_controller.h"
@@ -42,6 +42,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_history.h"
 
 namespace {
+
+constexpr auto kNotificationTextLimit = 255;
 
 enum class MediaCheckResult {
 	Good,
@@ -64,7 +66,7 @@ not_null<HistoryItem*> CreateUnsupportedMessage(
 	};
 	TextUtilities::ParseEntities(text, Ui::ItemTextNoMonoOptions().flags);
 	text.entities.push_front(
-		EntityInText(EntityInTextItalic, 0, text.text.size()));
+		EntityInText(EntityType::Italic, 0, text.text.size()));
 	flags &= ~MTPDmessage::Flag::f_post_author;
 	flags |= MTPDmessage_ClientFlag::f_is_unsupported;
 	return new HistoryMessage(
@@ -374,6 +376,21 @@ void HistoryItem::clearMainView() {
 void HistoryItem::addToUnreadMentions(UnreadMentionType type) {
 }
 
+void HistoryItem::applyEditionToHistoryCleared() {
+	const auto fromId = 0;
+	const auto replyToId = 0;
+	applyEdition(
+		MTP_messageService(
+			MTP_flags(0),
+			MTP_int(id),
+			MTP_int(fromId),
+			peerToMTP(history()->peer->id),
+			MTP_int(replyToId),
+			MTP_int(date()),
+			MTP_messageActionHistoryClear()
+		).c_messageService());
+}
+
 void HistoryItem::indexAsNewItem() {
 	if (IsServerMsgId(id)) {
 		CrashReports::SetAnnotation("addToUnreadMentions", QString::number(id));
@@ -493,7 +510,7 @@ bool HistoryItem::canDeleteForEveryone(TimeId now) const {
 	} else if (const auto user = peer->asUser()) {
 		// Bots receive all messages and there is no sense in revoking them.
 		// See https://github.com/telegramdesktop/tdesktop/issues/3818
-		if (user->botInfo) {
+		if (user->isBot() && !user->isSupport()) {
 			return false;
 		}
 	}
@@ -549,32 +566,7 @@ bool HistoryItem::suggestDeleteAllReport() const {
 }
 
 bool HistoryItem::hasDirectLink() const {
-	if (!IsServerMsgId(id)) {
-		return false;
-	}
-	if (auto channel = _history->peer->asChannel()) {
-		return channel->isPublic();
-	}
-	return false;
-}
-
-QString HistoryItem::directLink() const {
-	if (hasDirectLink()) {
-		auto channel = _history->peer->asChannel();
-		Assert(channel != nullptr);
-		auto query = channel->username + '/' + QString::number(id);
-		if (!channel->isMegagroup()) {
-			if (const auto media = this->media()) {
-				if (const auto document = media->document()) {
-					if (document->isVideoMessage()) {
-						return qsl("https://telesco.pe/") + query;
-					}
-				}
-			}
-		}
-		return Core::App().createInternalLinkFull(query);
-	}
-	return QString();
+	return IsServerMsgId(id) && _history->peer->isChannel();
 }
 
 ChannelId HistoryItem::channelId() const {
@@ -603,7 +595,7 @@ TimeId HistoryItem::dateOriginal() const {
 	return date();
 }
 
-not_null<PeerData*> HistoryItem::senderOriginal() const {
+PeerData *HistoryItem::senderOriginal() const {
 	if (const auto forwarded = Get<HistoryMessageForwarded>()) {
 		return forwarded->originalSender;
 	}
@@ -611,10 +603,19 @@ not_null<PeerData*> HistoryItem::senderOriginal() const {
 	return (peer->isChannel() && !peer->isMegagroup()) ? peer : from();
 }
 
+const HiddenSenderInfo *HistoryItem::hiddenForwardedInfo() const {
+	if (const auto forwarded = Get<HistoryMessageForwarded>()) {
+		return forwarded->hiddenSenderInfo.get();
+	}
+	return nullptr;
+}
+
 not_null<PeerData*> HistoryItem::fromOriginal() const {
 	if (const auto forwarded = Get<HistoryMessageForwarded>()) {
-		if (const auto user = forwarded->originalSender->asUser()) {
-			return user;
+		if (forwarded->originalSender) {
+			if (const auto user = forwarded->originalSender->asUser()) {
+				return user;
+			}
 		}
 	}
 	return from();
@@ -687,28 +688,28 @@ bool HistoryItem::isEmpty() const {
 }
 
 QString HistoryItem::notificationText() const {
-	auto getText = [this]() {
+	const auto result = [&] {
 		if (_media) {
 			return _media->notificationText();
 		} else if (!emptyText()) {
-			return _text.originalText();
+			return _text.toString();
 		}
 		return QString();
-	};
-
-	auto result = getText();
-	if (result.size() > 0xFF) {
-		result = result.mid(0, 0xFF) + qsl("...");
-	}
-	return result;
+	}();
+	return (result.size() <= kNotificationTextLimit)
+		? result
+		: result.mid(0, kNotificationTextLimit) + qsl("...");
 }
 
 QString HistoryItem::inDialogsText(DrawInDialog way) const {
 	auto getText = [this]() {
 		if (_media) {
+			if (_groupId) {
+				return textcmdLink(1, TextUtilities::Clean(lang(lng_in_dlg_album)));
+			}
 			return _media->chatListText();
 		} else if (!emptyText()) {
-			return TextUtilities::Clean(_text.originalText());
+			return TextUtilities::Clean(_text.toString());
 		}
 		return QString();
 	};
@@ -755,9 +756,6 @@ void HistoryItem::drawInDialog(
 HistoryItem::~HistoryItem() {
 	_history->owner().notifyItemRemoved(this);
 	App::historyUnregItem(this);
-	if (id < 0 && !App::quitting()) {
-		_history->session().uploader().cancel(fullId());
-	}
 }
 
 QDateTime ItemDateTime(not_null<const HistoryItem*> item) {

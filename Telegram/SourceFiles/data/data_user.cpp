@@ -15,6 +15,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace {
 
+// User with hidden last seen stays online in UI for such amount of seconds.
+constexpr auto kSetOnlineAfterActivity = TimeId(30);
+
 using UpdateFlag = Notify::PeerUpdate::Flag;
 
 } // namespace
@@ -76,7 +79,7 @@ void UserData::setContactStatus(ContactStatus status) {
 void UserData::setPhoto(const MTPUserProfilePhoto &photo) {
 	if (photo.type() == mtpc_userProfilePhoto) {
 		const auto &data = photo.c_userProfilePhoto();
-		updateUserpic(data.vphoto_id.v, data.vphoto_small);
+		updateUserpic(data.vphoto_id.v, data.vdc_id.v, data.vphoto_small);
 	} else {
 		clearUserpic();
 	}
@@ -210,13 +213,13 @@ void UserData::setNameOrPhone(const QString &newNameOrPhone) {
 }
 
 void UserData::madeAction(TimeId when) {
-	if (botInfo || isServiceUser(id) || when <= 0) return;
-
-	if (onlineTill <= 0 && -onlineTill < when) {
-		onlineTill = -when - SetOnlineAfterActivity;
+	if (isBot() || isServiceUser() || when <= 0) {
+		return;
+	} else if (onlineTill <= 0 && -onlineTill < when) {
+		onlineTill = -when - kSetOnlineAfterActivity;
 		Notify::peerUpdatedDelayed(this, Notify::PeerUpdate::Flag::UserOnlineChanged);
 	} else if (onlineTill > 0 && onlineTill < when + 1) {
-		onlineTill = when + SetOnlineAfterActivity;
+		onlineTill = when + kSetOnlineAfterActivity;
 		Notify::peerUpdatedDelayed(this, Notify::PeerUpdate::Flag::UserOnlineChanged);
 	}
 }

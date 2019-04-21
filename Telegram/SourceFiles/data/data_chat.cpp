@@ -31,12 +31,11 @@ void ChatData::setPhoto(const MTPChatPhoto &photo) {
 }
 
 void ChatData::setPhoto(PhotoId photoId, const MTPChatPhoto &photo) {
-	if (photo.type() == mtpc_chatPhoto) {
-		const auto &data = photo.c_chatPhoto();
-		updateUserpic(photoId, data.vphoto_small);
-	} else {
+	photo.match([&](const MTPDchatPhoto &data) {
+		updateUserpic(photoId, data.vdc_id.v, data.vphoto_small);
+	}, [&](const MTPDchatPhotoEmpty &) {
 		clearUserpic();
-	}
+	});
 }
 
 auto ChatData::DefaultAdminRights() -> AdminRights {
@@ -162,7 +161,7 @@ auto ChatData::applyUpdateVersion(int version) -> UpdateStatus {
 		return UpdateStatus::TooOld;
 	} else if (_version + 1 < version) {
 		invalidateParticipants();
-		session().api().requestPeer(this);
+		session().api().requestFullPeer(this);
 		return UpdateStatus::Skipped;
 	}
 	setVersion(version);

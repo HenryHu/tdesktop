@@ -213,10 +213,7 @@ void TopBar::createSearchView(
 
 	auto button = base::make_unique_q<Ui::IconButton>(this, _st.search);
 	auto search = button.get();
-	search->addClickHandler([=] {
-		_searchModeEnabled = true;
-		updateControlsVisibility(anim::type::normal);
-	});
+	search->addClickHandler([=] { showSearch(); });
 	auto searchWrap = pushButton(std::move(button));
 	registerToggleControlCallback(searchWrap, [=] {
 		return !selectionMode()
@@ -284,6 +281,11 @@ void TopBar::createSearchView(
 		_searchModeAvailable = visible || alreadyInSearch;
 		updateControlsVisibility(anim::type::instant);
 	}, wrap->lifetime());
+}
+
+void TopBar::showSearch() {
+	_searchModeEnabled = true;
+	updateControlsVisibility(anim::type::normal);
 }
 
 void TopBar::removeButton(not_null<Ui::RpWidget*> button) {
@@ -354,8 +356,7 @@ void TopBar::updateSelectionControlsGeometry(int newWidth) {
 void TopBar::paintEvent(QPaintEvent *e) {
 	Painter p(this);
 
-	auto ms = getms();
-	auto highlight = _a_highlight.current(ms, _highlight ? 1. : 0.);
+	auto highlight = _a_highlight.value(_highlight ? 1. : 0.);
 	if (_highlight && !_a_highlight.animating()) {
 		_highlight = false;
 		startHighlightAnimation();
@@ -555,11 +556,11 @@ rpl::producer<QString> TitleValue(
 		case Section::Type::Profile:
 			if (const auto feed = key.feed()) {
 				return lng_info_feed_title;
-			} else if (auto user = peer->asUser()) {
-				return user->botInfo
+			} else if (const auto user = peer->asUser()) {
+				return (user->isBot() && !user->isSupport())
 					? lng_info_bot_title
 					: lng_info_user_title;
-			} else if (auto channel = peer->asChannel()) {
+			} else if (const auto channel = peer->asChannel()) {
 				return channel->isMegagroup()
 					? lng_info_group_title
 					: lng_info_channel_title;

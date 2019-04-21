@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <rpl/variable.h>
 #include "base/flags.h"
+#include "base/observer.h"
 #include "dialogs/dialogs_key.h"
 
 class AuthSession;
@@ -22,7 +23,6 @@ enum class Type;
 
 namespace Media {
 namespace Player {
-class RoundController;
 class FloatController;
 class FloatDelegate;
 } // namespace Player
@@ -137,7 +137,9 @@ private:
 
 };
 
-class Controller : public Navigation {
+class Controller
+	: public Navigation
+	, private base::Subscriber {
 public:
 	Controller(
 		not_null<AuthSession*> session,
@@ -160,6 +162,7 @@ public:
 	rpl::producer<Dialogs::RowDescriptor> activeChatEntryValue() const;
 	rpl::producer<Dialogs::Key> activeChatValue() const;
 	bool jumpToChatListEntry(Dialogs::RowDescriptor row);
+	void showEditPeerBox(PeerData *peer);
 
 	void enableGifPauseReason(GifPauseReason reason);
 	void disableGifPauseReason(GifPauseReason reason);
@@ -248,13 +251,6 @@ public:
 		return this;
 	}
 
-	using RoundController = Media::Player::RoundController;
-	bool startRoundVideo(not_null<HistoryItem*> context);
-	RoundController *currentRoundVideo() const;
-	RoundController *roundVideo(not_null<const HistoryItem*> context) const;
-	RoundController *roundVideo(FullMsgId contextId) const;
-	void roundVideoFinished(not_null<RoundController*> video);
-
 	void setDefaultFloatPlayerDelegate(
 		not_null<Media::Player::FloatDelegate*> delegate);
 	void replaceFloatPlayerDelegate(
@@ -303,10 +299,11 @@ private:
 	std::deque<Dialogs::RowDescriptor> _chatEntryHistory;
 	int _chatEntryHistoryPosition = -1;
 
-	std::unique_ptr<RoundController> _roundVideo;
 	std::unique_ptr<Media::Player::FloatController> _floatPlayers;
 	Media::Player::FloatDelegate *_defaultFloatPlayerDelegate = nullptr;
 	Media::Player::FloatDelegate *_replacementFloatPlayerDelegate = nullptr;
+
+	PeerData *_showEditPeer = nullptr;
 
 	rpl::lifetime _lifetime;
 

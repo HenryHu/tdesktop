@@ -276,11 +276,11 @@ object_ptr<Ui::RpWidget> DetailsFiller::setupInfo() {
 				if (result.text.startsWith(remove)) {
 					result.text.remove(0, remove.size());
 				}
-				result.entities.push_back(EntityInText(
-					EntityInTextCustomUrl,
+				result.entities.push_back({
+					EntityType::CustomUrl,
 					0,
 					result.text.size(),
-					link));
+					link });
 			}
 			return result;
 		});
@@ -558,12 +558,12 @@ void ActionsFiller::addBotCommandActions(not_null<UserData*> user) {
 }
 
 void ActionsFiller::addReportAction() {
-	auto peer = _peer;
+	const auto peer = _peer;
 	AddActionButton(
 		_wrap,
 		Lang::Viewer(lng_profile_report),
 		rpl::single(true),
-		[peer] { Ui::show(Box<ReportBox>(peer)); },
+		[=] { Ui::show(Box<ReportBox>(peer)); },
 		st::infoBlockButton);
 }
 
@@ -574,12 +574,12 @@ void ActionsFiller::addBlockAction(not_null<UserData*> user) {
 	) | rpl::map([user] {
 		switch (user->blockStatus()) {
 		case UserData::BlockStatus::Blocked:
-			return Lang::Viewer(user->botInfo
+			return Lang::Viewer((user->isBot() && !user->isSupport())
 				? lng_profile_restart_bot
 				: lng_profile_unblock_user);
 		case UserData::BlockStatus::NotBlocked:
 		default:
-			return Lang::Viewer(user->botInfo
+			return Lang::Viewer((user->isBot() && !user->isSupport())
 				? lng_profile_block_bot
 				: lng_profile_block_user);
 		}
@@ -652,14 +652,14 @@ void ActionsFiller::fillUserActions(not_null<UserData*> user) {
 	}
 	addClearHistoryAction(user);
 	addDeleteConversationAction(user);
-	if (!user->isSelf()) {
-		if (user->botInfo) {
+	if (!user->isSelf() && !user->isSupport()) {
+		if (user->isBot()) {
 			addBotCommandActions(user);
 		}
 		_wrap->add(CreateSkipWidget(
 			_wrap,
 			st::infoBlockButtonSkip));
-		if (user->botInfo) {
+		if (user->isBot()) {
 			addReportAction();
 		}
 		addBlockAction(user);

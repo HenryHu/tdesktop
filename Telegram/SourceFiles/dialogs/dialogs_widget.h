@@ -8,8 +8,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "window/section_widget.h"
+#include "ui/effects/animations.h"
 #include "ui/widgets/scroll_area.h"
 #include "dialogs/dialogs_key.h"
+#include "ui/special_buttons.h"
 
 class DialogsInner;
 
@@ -34,7 +36,7 @@ class FadeWrapScaled;
 
 namespace Window {
 class Controller;
-class ConnectingWidget;
+class ConnectionState;
 } // namespace Window
 
 enum DialogsSearchRequestType {
@@ -63,7 +65,7 @@ public:
 	void repaintDialogRow(Dialogs::Mode list, not_null<Dialogs::Row*> row);
 	void repaintDialogRow(Dialogs::RowDescriptor row);
 
-	void dialogsToUp();
+	void jumpToTop();
 
 	void startWidthAnimation();
 	void stopWidthAnimation();
@@ -90,6 +92,8 @@ public:
 	QRect rectForFloatPlayer() const override;
 
 	void notify_historyMuteUpdated(History *history);
+
+	~DialogsWidget();
 
 signals:
 	void cancelled();
@@ -195,11 +199,22 @@ private:
 	class BottomButton;
 	object_ptr<BottomButton> _updateTelegram = { nullptr };
 	object_ptr<BottomButton> _loadMoreChats = { nullptr };
-	base::unique_qptr<Window::ConnectingWidget> _connecting;
+	std::unique_ptr<Window::ConnectionState> _connecting;
 
-	Animation _a_show;
+	Ui::Animations::Simple _scrollToAnimation;
+	Ui::Animations::Simple _a_show;
 	Window::SlideDirection _showDirection;
 	QPixmap _cacheUnder, _cacheOver;
+
+	Ui::Animations::Simple _scrollToTopShown;
+	bool _scrollToTopIsShown = false;
+	object_ptr<Ui::HistoryDownButton> _scrollToTop;
+
+	void scrollToTop();
+	void setupScrollUpButton();
+	void updateScrollUpVisibility();
+	void startScrollUpButtonAnimation(bool shown);
+	void updateScrollUpPosition();
 
 	Dialogs::Key _searchInChat;
 	History *_searchInMigrated = nullptr;

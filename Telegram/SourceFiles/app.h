@@ -35,6 +35,8 @@ enum RoundCorners {
 	SelectedOverlayLargeCorners,
 	DateCorners,
 	DateSelectedCorners,
+	OverviewVideoCorners,
+	OverviewVideoSelectedCorners,
 	ForwardCorners,
 	MediaviewSaveCorners,
 	EmojiHoverCorners,
@@ -74,8 +76,6 @@ namespace App {
 	void feedOutboxRead(const PeerId &peer, MsgId upTo, TimeId when);
 	void feedWereDeleted(ChannelId channelId, const QVector<MTPint> &msgsIds);
 	void feedUserLink(MTPint userId, const MTPContactLink &myLink, const MTPContactLink &foreignLink);
-
-	ImagePtr image(const MTPPhotoSize &size);
 
 	[[nodiscard]] QString peerName(const PeerData *peer, bool forDialogs = false);
 

@@ -270,9 +270,6 @@ void MainWindow::psSetupTrayIcon() {
 			}
 			trayIcon->setIcon(icon);
 
-			trayIcon->setToolTip(str_const_toString(AppName));
-			connect(trayIcon, SIGNAL(activated(QSystemTrayIcon::ActivationReason)), this, SLOT(toggleTray(QSystemTrayIcon::ActivationReason)), Qt::UniqueConnection);
-
 			// This is very important for native notifications via libnotify!
 			// Some notification servers compose several notifications with a "Reply"
 			// action into one and after that a click on "Reply" button does not call
@@ -280,7 +277,7 @@ void MainWindow::psSetupTrayIcon() {
 			// just ignores ibus messages, but Qt tray icon at least emits this signal.
 			connect(trayIcon, SIGNAL(messageClicked()), this, SLOT(showFromTray()));
 
-			App::wnd()->updateTrayMenu();
+			attachToTrayIcon(trayIcon);
 		}
 		updateIconCounters();
 
@@ -329,7 +326,7 @@ void MainWindow::workmodeUpdated(DBIWorkMode mode) {
 void MainWindow::psUpdateIndicator() {
 #ifndef TDESKTOP_DISABLE_GTK_INTEGRATION
 	_psUpdateIndicatorTimer.stop();
-	_psLastIndicatorUpdate = getms();
+	_psLastIndicatorUpdate = crl::now();
 	QFileInfo iconFile(_trayIconImageFile());
 	if (iconFile.exists()) {
 		QByteArray path = QFile::encodeName(iconFile.absoluteFilePath()), name = QFile::encodeName(iconFile.fileName());
@@ -371,7 +368,7 @@ void MainWindow::updateIconCounters() {
 	if (noQtTrayIcon) {
 #ifndef TDESKTOP_DISABLE_GTK_INTEGRATION
 		if (useAppIndicator) {
-			if (getms() > _psLastIndicatorUpdate + 1000) {
+			if (crl::now() > _psLastIndicatorUpdate + 1000) {
 				psUpdateIndicator();
 			} else if (!_psUpdateIndicatorTimer.isActive()) {
 				_psUpdateIndicatorTimer.start(100);

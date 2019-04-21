@@ -165,17 +165,16 @@ void ScrollBar::paintEvent(QPaintEvent *e) {
 		hide();
 		return;
 	}
-	auto ms = getms();
-	auto opacity = _a_opacity.current(ms, _hiding ? 0. : 1.);
+	auto opacity = _a_opacity.value(_hiding ? 0. : 1.);
 	if (opacity == 0.) return;
 
 	Painter p(this);
 	auto deltal = _vertical ? _st->deltax : 0, deltar = _vertical ? _st->deltax : 0;
 	auto deltat = _vertical ? 0 : _st->deltax, deltab = _vertical ? 0 : _st->deltax;
 	p.setPen(Qt::NoPen);
-	auto bg = anim::color(_st->bg, _st->bgOver, _a_over.current(ms, (_over || _moving) ? 1. : 0.));
+	auto bg = anim::color(_st->bg, _st->bgOver, _a_over.value((_over || _moving) ? 1. : 0.));
 	bg.setAlpha(anim::interpolate(0, bg.alpha(), opacity));
-	auto bar = anim::color(_st->barBg, _st->barBgOver, _a_barOver.current(ms, (_overbar || _moving) ? 1. : 0.));
+	auto bar = anim::color(_st->barBg, _st->barBgOver, _a_barOver.value((_overbar || _moving) ? 1. : 0.));
 	bar.setAlpha(anim::interpolate(0, bar.alpha(), opacity));
 	if (_st->round) {
 		PainterHighQualityEnabler hq(p);
@@ -189,7 +188,7 @@ void ScrollBar::paintEvent(QPaintEvent *e) {
 	}
 }
 
-void ScrollBar::hideTimeout(TimeMs dt) {
+void ScrollBar::hideTimeout(crl::time dt) {
 	if (_hiding && dt > 0) {
 		_hiding = false;
 		_a_opacity.start([this] { update(); }, 0., 1., _st->duration);
@@ -419,7 +418,7 @@ void ScrollArea::onTouchTimer() {
 }
 
 void ScrollArea::onTouchScrollTimer() {
-	auto nowTime = getms();
+	auto nowTime = crl::now();
 	if (_touchScrollState == TouchScrollState::Acceleration && _touchWaitingAcceleration && (nowTime - _touchAccelerationTime) > 40) {
 		_touchScrollState = TouchScrollState::Manual;
 		touchResetSpeed();
@@ -440,7 +439,7 @@ void ScrollArea::onTouchScrollTimer() {
 }
 
 void ScrollArea::touchUpdateSpeed() {
-	const auto nowTime = getms();
+	const auto nowTime = crl::now();
 	if (_touchPrevPosValid) {
 		const int elapsed = nowTime - _touchSpeedTime;
 		if (elapsed) {
@@ -521,7 +520,7 @@ void ScrollArea::touchEvent(QTouchEvent *e) {
 		if (_touchScrollState == TouchScrollState::Auto) {
 			_touchScrollState = TouchScrollState::Acceleration;
 			_touchWaitingAcceleration = true;
-			_touchAccelerationTime = getms();
+			_touchAccelerationTime = crl::now();
 			touchUpdateSpeed();
 			_touchStart = _touchPos;
 		} else {
@@ -544,7 +543,7 @@ void ScrollArea::touchEvent(QTouchEvent *e) {
 				touchScrollUpdated(_touchPos);
 			} else if (_touchScrollState == TouchScrollState::Acceleration) {
 				touchUpdateSpeed();
-				_touchAccelerationTime = getms();
+				_touchAccelerationTime = crl::now();
 				if (_touchSpeed.isNull()) {
 					_touchScrollState = TouchScrollState::Manual;
 				}
@@ -561,7 +560,7 @@ void ScrollArea::touchEvent(QTouchEvent *e) {
 				_touchScrollState = TouchScrollState::Auto;
 				_touchPrevPosValid = false;
 				_touchScrollTimer.start(15);
-				_touchTime = getms();
+				_touchTime = crl::now();
 			} else if (_touchScrollState == TouchScrollState::Auto) {
 				_touchScrollState = TouchScrollState::Manual;
 				_touchScroll = false;
@@ -582,7 +581,7 @@ void ScrollArea::touchEvent(QTouchEvent *e) {
 				auto windowHandle = window()->windowHandle();
 				auto localPoint = windowHandle->mapFromGlobal(_touchStart);
 				QContextMenuEvent ev(QContextMenuEvent::Mouse, localPoint, _touchStart, QGuiApplication::keyboardModifiers());
-				ev.setTimestamp(getms());
+				ev.setTimestamp(crl::now());
 				QGuiApplication::sendEvent(windowHandle, &ev);
 			}
 		}

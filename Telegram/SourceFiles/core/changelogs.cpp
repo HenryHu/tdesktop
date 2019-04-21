@@ -62,6 +62,24 @@ std::map<int, const char*> BetaLogs() {
 
 		"- Choose input and output devices for Telegram Calls "
 		"in Settings > Adavanced > Call Settings."
+	},
+	{
+		1005016,
+		"- Play video files and listen to received music "
+		"without waiting for them to download.\n"
+
+		"- Press CTRL+0 (CMD+0 on macOS) to jump to your Saved Messages."
+	},
+	{
+		1006004,
+		"- Replace media when editing messages with media content.\n"
+
+		"- Jump quickly to the top of your chats list.\n"
+
+		"- Get emoji suggestions for the first word you type in a message.\n"
+
+		"- Help Telegram improve emoji suggestions in your language "
+		"using this interface https://translations.telegram.org/en/emoji"
 	}
 	};
 }
@@ -87,7 +105,7 @@ Changelogs::Changelogs(not_null<AuthSession*> session, int oldVersion)
 , _oldVersion(oldVersion) {
 	_chatsSubscription = subscribe(
 		_session->data().moreChatsLoaded(),
-		[this] { requestCloudLogs(); });
+		[=] { requestCloudLogs(); });
 }
 
 std::unique_ptr<Changelogs> Changelogs::Create(
@@ -150,9 +168,7 @@ void Changelogs::addLocalLogs() {
 void Changelogs::addLocalLog(const QString &text) {
 	auto textWithEntities = TextWithEntities{ text };
 	TextUtilities::ParseEntities(textWithEntities, TextParseLinks);
-	_session->data().serviceNotification(
-		textWithEntities,
-		MTP_messageMediaEmpty());
+	_session->data().serviceNotification(textWithEntities);
 	_addedSomeLocal = true;
 };
 

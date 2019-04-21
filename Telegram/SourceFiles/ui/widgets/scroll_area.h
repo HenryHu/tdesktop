@@ -7,8 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include <rpl/event_stream.h>
 #include "ui/rp_widget.h"
+#include "ui/effects/animations.h"
 #include "styles/style_widgets.h"
 
 namespace Ui {
@@ -57,7 +57,7 @@ public:
 	void recountSize();
 	void updateBar(bool force = false);
 
-	void hideTimeout(TimeMs dt);
+	void hideTimeout(crl::time dt);
 
 private slots:
 	void onValueChanged();
@@ -99,12 +99,12 @@ private:
 
 	int32 _startFrom, _scrollMax;
 
-	TimeMs _hideIn = 0;
+	crl::time _hideIn = 0;
 	QTimer _hideTimer;
 
-	Animation _a_over;
-	Animation _a_barOver;
-	Animation _a_opacity;
+	Ui::Animations::Simple _a_over;
+	Ui::Animations::Simple _a_barOver;
+	Ui::Animations::Simple _a_opacity;
 
 	QRect _bar;
 };
@@ -279,9 +279,9 @@ private:
 	bool _touchPrevPosValid = false;
 	bool _touchWaitingAcceleration = false;
 	QPoint _touchSpeed;
-	TimeMs _touchSpeedTime = 0;
-	TimeMs _touchAccelerationTime = 0;
-	TimeMs _touchTime = 0;
+	crl::time _touchSpeedTime = 0;
+	crl::time _touchAccelerationTime = 0;
+	crl::time _touchTime = 0;
 	QTimer _touchScrollTimer;
 
 	bool _widgetAcceptsTouch = false;

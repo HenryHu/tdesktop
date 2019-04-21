@@ -7,7 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "media/player/media_player_panel.h"
 
-#include "media/player/media_player_cover.h"
 #include "media/player/media_player_instance.h"
 #include "info/media/info_media_list_widget.h"
 #include "history/history.h"
@@ -31,17 +30,15 @@ namespace {
 using ListWidget = Info::Media::ListWidget;
 
 constexpr auto kPlaylistIdsLimit = 32;
-constexpr auto kDelayedHideTimeout = TimeMs(3000);
+constexpr auto kDelayedHideTimeout = crl::time(3000);
 
 } // namespace
 
 Panel::Panel(
 	QWidget *parent,
-	not_null<Window::Controller*> window,
-	Layout layout)
+	not_null<Window::Controller*> window)
 : RpWidget(parent)
 , AbstractController(window)
-, _layout(layout)
 , _showTimer([this] { startShow(); })
 , _hideTimer([this] { startHideChecked(); })
 , _scroll(this, st::mediaPlayerScroll) {
@@ -57,18 +54,12 @@ bool Panel::overlaps(const QRect &globalRect) {
 	return rect().marginsRemoved(QMargins(marginLeft, contentTop(), marginRight, contentBottom())).contains(QRect(mapFromGlobal(globalRect.topLeft()), globalRect.size()));
 }
 
-void Panel::windowActiveChanged() {
-	if (!App::wnd()->windowHandle()->isActive() && !isHidden()) {
-		leaveEvent(nullptr);
-	}
-}
-
 void Panel::resizeEvent(QResizeEvent *e) {
 	updateControlsGeometry();
 }
 
 void Panel::listHeightUpdated(int newHeight) {
-	if (newHeight > emptyInnerHeight() || _cover) {
+	if (newHeight > emptyInnerHeight()) {
 		updateSize();
 	} else {
 		_hideTimer.callOnce(0);
@@ -79,7 +70,7 @@ bool Panel::contentTooSmall() const {
 	const auto innerHeight = _scroll->widget()
 		? _scroll->widget()->height()
 		: emptyInnerHeight();
-	return (innerHeight <= emptyInnerHeight() && !_cover);
+	return (innerHeight <= emptyInnerHeight());
 }
 
 int Panel::emptyInnerHeight() const {
@@ -100,15 +91,6 @@ bool Panel::preventAutoHide() const {
 void Panel::updateControlsGeometry() {
 	auto scrollTop = contentTop();
 	auto width = contentWidth();
-	if (_cover) {
-		_cover->resizeToWidth(width);
-		_cover->moveToRight(contentRight(), scrollTop);
-		scrollTop += _cover->height();
-		if (_scrollShadow) {
-			_scrollShadow->resize(width, st::mediaPlayerScrollShadow.extend.bottom());
-			_scrollShadow->moveToRight(contentRight(), scrollTop);
-		}
-	}
 	auto scrollHeight = qMax(height() - scrollTop - contentBottom() - scrollMarginBottom(), 0);
 	if (scrollHeight > 0) {
 		_scroll->setGeometryToRight(contentRight(), scrollTop, width, scrollHeight);
@@ -135,9 +117,6 @@ void Panel::scrollPlaylistToCurrentTrack() {
 void Panel::updateSize() {
 	auto width = contentLeft() + st::mediaPlayerPanelWidth + contentRight();
 	auto height = contentTop();
-	if (_cover) {
-		height += _cover->height();
-	}
 	auto listHeight = 0;
 	if (auto widget = _scroll->widget()) {
 		listHeight = widget->height();
@@ -147,18 +126,15 @@ void Panel::updateSize() {
 	height += scrollHeight + contentBottom();
 	resize(width, height);
 	_scroll->setVisible(scrollVisible);
-	if (_scrollShadow) {
-		_scrollShadow->setVisible(scrollVisible);
-	}
 }
 
 void Panel::paintEvent(QPaintEvent *e) {
 	Painter p(this);
 
 	if (!_cache.isNull()) {
-		bool animating = _a_appearance.animating(getms());
+		bool animating = _a_appearance.animating();
 		if (animating) {
-			p.setOpacity(_a_appearance.current(_hiding ? 0. : 1.));
+			p.setOpacity(_a_appearance.value(_hiding ? 0. : 1.));
 		} else if (_hiding || isHidden()) {
 			hideFinished();
 			return;
@@ -173,10 +149,10 @@ void Panel::paintEvent(QPaintEvent *e) {
 
 	// draw shadow
 	auto shadowedRect = myrtlrect(contentLeft(), contentTop(), contentWidth(), contentHeight());
-	auto shadowedSides = (rtl() ? RectPart::Right : RectPart::Left) | RectPart::Bottom;
-	if (_layout != Layout::Full) {
-		shadowedSides |= (rtl() ? RectPart::Left : RectPart::Right) | RectPart::Top;
-	}
+	auto shadowedSides = (rtl() ? RectPart::Right : RectPart::Left)
+		| RectPart::Bottom
+		| (rtl() ? RectPart::Left : RectPart::Right)
+		| RectPart::Top;
 	Ui::Shadow::paint(p, shadowedRect, width(), st::defaultRoundShadow, shadowedSides);
 	auto parts = RectPart::Full;
 	App::roundRect(p, shadowedRect, st::menuBg, MenuCorners, nullptr, parts);
@@ -186,12 +162,12 @@ void Panel::enterEventHook(QEvent *e) {
 	if (_ignoringEnterEvents || contentTooSmall()) return;
 
 	_hideTimer.cancel();
-	if (_a_appearance.animating(getms())) {
+	if (_a_appearance.animating()) {
 		startShow();
 	} else {
 		_showTimer.callOnce(0);
 	}
-	return TWidget::enterEventHook(e);
+	return RpWidget::enterEventHook(e);
 }
 
 void Panel::leaveEventHook(QEvent *e) {
@@ -199,17 +175,17 @@ void Panel::leaveEventHook(QEvent *e) {
 		return;
 	}
 	_showTimer.cancel();
-	if (_a_appearance.animating(getms())) {
+	if (_a_appearance.animating()) {
 		startHide();
 	} else {
 		_hideTimer.callOnce(300);
 	}
-	return TWidget::leaveEventHook(e);
+	return RpWidget::leaveEventHook(e);
 }
 
 void Panel::showFromOther() {
 	_hideTimer.cancel();
-	if (_a_appearance.animating(getms())) {
+	if (_a_appearance.animating()) {
 		startShow();
 	} else {
 		_showTimer.callOnce(300);
@@ -218,7 +194,7 @@ void Panel::showFromOther() {
 
 void Panel::hideFromOther() {
 	_showTimer.cancel();
-	if (_a_appearance.animating(getms())) {
+	if (_a_appearance.animating()) {
 		startHide();
 	} else {
 		_hideTimer.callOnce(0);
@@ -228,13 +204,6 @@ void Panel::hideFromOther() {
 void Panel::ensureCreated() {
 	if (_scroll->widget()) return;
 
-	if (_layout == Layout::Full) {
-		_cover.create(this);
-		setPinCallback(std::move(_pinCallback));
-		setCloseCallback(std::move(_closeCallback));
-
-		_scrollShadow.create(this, st::mediaPlayerScrollShadow, RectPart::Bottom);
-	}
 	_refreshListLifetime = instance()->playlistChanges(
 		AudioMsgId::Type::Song
 	) | rpl::start_with_next([this] {
@@ -242,15 +211,12 @@ void Panel::ensureCreated() {
 	});
 	refreshList();
 
-	if (cPlatform() == dbipMac || cPlatform() == dbipMacOld) {
-		if (const auto window = App::wnd()) {
-			connect(
-				window->windowHandle(),
-				&QWindow::activeChanged,
-				this,
-				&Panel::windowActiveChanged);
-		}
-	}
+	macWindowDeactivateEvents(
+	) | rpl::filter([=] {
+		return !isHidden();
+	}) | rpl::start_with_next([=] {
+		leaveEvent(nullptr);
+	}, _refreshListLifetime);
 
 	_ignoringEnterEvents = false;
 }
@@ -328,34 +294,9 @@ void Panel::refreshList() {
 void Panel::performDestroy() {
 	if (!_scroll->widget()) return;
 
-	_cover.destroy();
 	_scroll->takeWidget<QWidget>().destroy();
 	_listPeer = _listMigratedPeer = nullptr;
 	_refreshListLifetime.destroy();
-
-	if (cPlatform() == dbipMac || cPlatform() == dbipMacOld) {
-		if (const auto window = App::wnd()) {
-			disconnect(
-				window->windowHandle(),
-				&QWindow::activeChanged,
-				this,
-				&Panel::windowActiveChanged);
-		}
-	}
-}
-
-void Panel::setPinCallback(ButtonCallback &&callback) {
-	_pinCallback = std::move(callback);
-	if (_cover) {
-		_cover->setPinCallback(ButtonCallback(_pinCallback));
-	}
-}
-
-void Panel::setCloseCallback(ButtonCallback &&callback) {
-	_closeCallback = std::move(callback);
-	if (_cover) {
-		_cover->setCloseCallback(ButtonCallback(_closeCallback));
-	}
 }
 
 Info::Key Panel::key() const {
@@ -444,11 +385,11 @@ int Panel::contentLeft() const {
 }
 
 int Panel::contentTop() const {
-	return (_layout == Layout::Full) ? 0 : st::mediaPlayerPanelMarginLeft;
+	return st::mediaPlayerPanelMarginLeft;
 }
 
 int Panel::contentRight() const {
-	return (_layout == Layout::Full) ? 0 : st::mediaPlayerPanelMarginLeft;
+	return st::mediaPlayerPanelMarginLeft;
 }
 
 int Panel::contentBottom() const {

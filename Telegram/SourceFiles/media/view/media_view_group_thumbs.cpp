@@ -25,7 +25,7 @@ namespace Media {
 namespace View {
 namespace {
 
-constexpr auto kThumbDuration = TimeMs(150);
+constexpr auto kThumbDuration = crl::time(150);
 
 int Round(float64 value) {
 	return int(std::round(value));
@@ -624,7 +624,7 @@ void GroupThumbs::clear() {
 }
 
 void GroupThumbs::startDelayedAnimation() {
-	_animation.finish();
+	_animation.stop();
 	_waitingForAnimationStart = true;
 	countUpdatedRect();
 }
@@ -650,7 +650,7 @@ bool GroupThumbs::hidden() const {
 void GroupThumbs::checkForAnimationStart() {
 	if (_waitingForAnimationStart) {
 		_waitingForAnimationStart = false;
-		_animation.start([this] { update(); }, 0., 1., kThumbDuration);
+		_animation.start([=] { update(); }, 0., 1., kThumbDuration);
 	}
 }
 
@@ -661,15 +661,10 @@ void GroupThumbs::update() {
 	_updateRequests.fire_copy(_updatedRect);
 }
 
-void GroupThumbs::paint(
-		Painter &p,
-		int x,
-		int y,
-		int outerWidth,
-		TimeMs ms) {
+void GroupThumbs::paint(Painter &p, int x, int y, int outerWidth) {
 	const auto progress = _waitingForAnimationStart
 		? 0.
-		: _animation.current(ms, 1.);
+		: _animation.value(1.);
 	x += (_width / 2);
 	y += st::mediaviewGroupPadding.top();
 	for (auto i = _cache.begin(); i != _cache.end();) {
