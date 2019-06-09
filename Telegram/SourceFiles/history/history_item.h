@@ -111,16 +111,15 @@ public:
 	void removeMainView();
 
 	void destroy();
-	bool out() const {
+	[[nodiscard]] bool out() const {
 		return _flags & MTPDmessage::Flag::f_out;
 	}
-	bool unread() const;
-	bool mentionsMe() const {
-		return _flags & MTPDmessage::Flag::f_mentioned;
-	}
-	bool isUnreadMention() const;
-	bool isUnreadMedia() const;
-	bool hasUnreadMediaFlag() const;
+	[[nodiscard]] bool unread() const;
+	void markClientSideAsRead();
+	[[nodiscard]] bool mentionsMe() const;
+	[[nodiscard]] bool isUnreadMention() const;
+	[[nodiscard]] bool isUnreadMedia() const;
+	[[nodiscard]] bool hasUnreadMediaFlag() const;
 	void markMediaRead();
 
 
@@ -129,7 +128,7 @@ public:
 	void savePreviousMedia() {
 		_savedMedia = _media->clone(this);
 	}
-	bool isEditingMedia() const {
+	[[nodiscard]] bool isEditingMedia() const {
 		return _savedMedia != nullptr;
 	}
 	void clearSavedMedia() {
@@ -295,6 +294,19 @@ public:
 
 	MessageGroupId groupId() const;
 
+	const HistoryMessageReplyMarkup *inlineReplyMarkup() const {
+		return const_cast<HistoryItem*>(this)->inlineReplyMarkup();
+	}
+	const ReplyKeyboard *inlineReplyKeyboard() const {
+		return const_cast<HistoryItem*>(this)->inlineReplyKeyboard();
+	}
+	HistoryMessageReplyMarkup *inlineReplyMarkup();
+	ReplyKeyboard *inlineReplyKeyboard();
+
+	[[nodiscard]] ChannelData *discussionPostOriginalSender() const;
+	[[nodiscard]] bool isDiscussionPost() const;
+	[[nodiscard]] PeerData *displayFrom() const;
+
 	virtual std::unique_ptr<HistoryView::Element> createView(
 		not_null<HistoryView::ElementDelegate*> delegate) = 0;
 
@@ -318,14 +330,6 @@ protected:
 	not_null<PeerData*> _from;
 	MTPDmessage::Flags _flags = 0;
 
-	const HistoryMessageReplyMarkup *inlineReplyMarkup() const {
-		return const_cast<HistoryItem*>(this)->inlineReplyMarkup();
-	}
-	const ReplyKeyboard *inlineReplyKeyboard() const {
-		return const_cast<HistoryItem*>(this)->inlineReplyKeyboard();
-	}
-	HistoryMessageReplyMarkup *inlineReplyMarkup();
-	ReplyKeyboard *inlineReplyKeyboard();
 	void invalidateChatListEntry();
 
 	void setGroupId(MessageGroupId groupId);
@@ -343,7 +347,7 @@ private:
 	HistoryView::Element *_mainView = nullptr;
 	friend class HistoryView::Element;
 
-	MessageGroupId _groupId = MessageGroupId::None;
+	MessageGroupId _groupId = MessageGroupId();
 
 };
 

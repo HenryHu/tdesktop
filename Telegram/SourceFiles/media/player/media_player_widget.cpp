@@ -7,7 +7,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "media/player/media_player_widget.h"
 
+#include "platform/platform_specific.h"
 #include "data/data_document.h"
+#include "data/data_session.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/continuous_sliders.h"
 #include "ui/widgets/shadow.h"
@@ -24,7 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item.h"
 #include "storage/localstorage.h"
 #include "layout.h"
-#include "facades.h"
+#include "auth_session.h"
 
 namespace Media {
 namespace Player {
@@ -145,9 +147,6 @@ Widget::Widget(QWidget *parent) : RpWidget(parent)
 			updateRepeatTrackIcon();
 		}
 	});
-	subscribe(instance()->updatedNotifier(), [this](const TrackState &state) {
-		handleSongUpdate(state);
-	});
 	subscribe(instance()->trackChangedNotifier(), [this](AudioMsgId::Type type) {
 		if (type == _type) {
 			handleSongChange();
@@ -163,6 +162,12 @@ Widget::Widget(QWidget *parent) : RpWidget(parent)
 			}
 		}
 	});
+
+	instance()->updatedNotifier(
+	) | rpl::start_with_next([=](const TrackState &state) {
+		handleSongUpdate(state);
+	}, lifetime());
+
 	setType(AudioMsgId::Type::Song);
 	_playPause->finishTransform();
 }
@@ -296,7 +301,7 @@ void Widget::mouseReleaseEvent(QMouseEvent *e) {
 		if (_labelsOver == downLabels) {
 			if (_type == AudioMsgId::Type::Voice) {
 				auto current = instance()->current(_type);
-				if (auto item = App::histItemById(current.contextId())) {
+				if (auto item = Auth().data().message(current.contextId())) {
 					Ui::showPeerHistoryAtItem(item);
 				}
 			}
@@ -509,7 +514,7 @@ void Widget::handleSongChange() {
 
 	TextWithEntities textWithEntities;
 	if (document->isVoiceMessage() || document->isVideoMessage()) {
-		if (const auto item = App::histItemById(current.contextId())) {
+		if (const auto item = Auth().data().message(current.contextId())) {
 			const auto name = App::peerName(item->fromOriginal());
 			const auto date = [item] {
 				const auto parsed = ItemDateTime(item);

@@ -86,30 +86,29 @@ private:
 } // namespace Data
 
 struct MessageGroupId {
-	using Underlying = uint64;
+	uint64 peer = 0;
+	uint64 value = 0;
 
-	enum Type : Underlying {
-		None = 0,
-	} value;
-
-	MessageGroupId(Type value = None) : value(value) {
-	}
-	static MessageGroupId FromRaw(Underlying value) {
-		return static_cast<Type>(value);
+	MessageGroupId() = default;
+	static MessageGroupId FromRaw(uint64 peer, uint64 value) {
+		auto result = MessageGroupId();
+		result.peer = peer;
+		result.value = value;
+		return result;
 	}
 
 	bool empty() const {
-		return value == None;
+		return !value;
 	}
 	explicit operator bool() const {
 		return !empty();
 	}
-	Underlying raw() const {
-		return static_cast<Underlying>(value);
+	uint64 raw() const {
+		return value;
 	}
 
-	friend inline Type value_ordering_helper(MessageGroupId value) {
-		return value.value;
+	friend inline std::pair<uint64, uint64> value_ordering_helper(MessageGroupId value) {
+		return std::make_pair(value.value, value.peer);
 	}
 
 };
@@ -122,13 +121,13 @@ class BotCommand;
 struct BotInfo;
 
 namespace Data {
-class Feed;
+class Folder;
 } // namespace Data
 
 using UserId = int32;
 using ChatId = int32;
 using ChannelId = int32;
-using FeedId = int32;
+using FolderId = int32;
 
 constexpr auto NoChannel = ChannelId(0);
 

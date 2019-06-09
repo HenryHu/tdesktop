@@ -93,6 +93,8 @@ QByteArray AuthSessionSettings::serialize() const {
 		stream << qint32(_variables.exeLaunchWarning ? 1 : 0);
 		stream << autoDownload;
 		stream << qint32(_variables.supportAllSearchResults.current() ? 1 : 0);
+		stream << qint32(_variables.archiveCollapsed.current() ? 1 : 0);
+		stream << qint32(_variables.notifyAboutPinned.current() ? 1 : 0);
 	}
 	return result;
 }
@@ -129,6 +131,8 @@ void AuthSessionSettings::constructFromSerialized(const QByteArray &serialized) 
 	qint32 exeLaunchWarning = _variables.exeLaunchWarning ? 1 : 0;
 	QByteArray autoDownload;
 	qint32 supportAllSearchResults = _variables.supportAllSearchResults.current() ? 1 : 0;
+	qint32 archiveCollapsed = _variables.archiveCollapsed.current() ? 1 : 0;
+	qint32 notifyAboutPinned = _variables.notifyAboutPinned.current() ? 1 : 0;
 
 	stream >> selectorTab;
 	stream >> lastSeenWarningSeen;
@@ -208,6 +212,12 @@ void AuthSessionSettings::constructFromSerialized(const QByteArray &serialized) 
 	if (!stream.atEnd()) {
 		stream >> supportAllSearchResults;
 	}
+	if (!stream.atEnd()) {
+		stream >> archiveCollapsed;
+	}
+	if (!stream.atEnd()) {
+		stream >> notifyAboutPinned;
+	}
 	if (stream.status() != QDataStream::Ok) {
 		LOG(("App Error: "
 			"Bad data for AuthSessionSettings::constructFromSerialized()"));
@@ -277,6 +287,8 @@ void AuthSessionSettings::constructFromSerialized(const QByteArray &serialized) 
 	_variables.countUnreadMessages = (countUnreadMessages == 1);
 	_variables.exeLaunchWarning = (exeLaunchWarning == 1);
 	_variables.supportAllSearchResults = (supportAllSearchResults == 1);
+	_variables.archiveCollapsed = (archiveCollapsed == 1);
+	_variables.notifyAboutPinned = (notifyAboutPinned == 1);
 }
 
 void AuthSessionSettings::setSupportChatsTimeSlice(int slice) {
@@ -371,8 +383,32 @@ rpl::producer<int> AuthSessionSettings::thirdColumnWidthChanges() const {
 	return _variables.thirdColumnWidth.changes();
 }
 
+void AuthSessionSettings::setArchiveCollapsed(bool collapsed) {
+	_variables.archiveCollapsed = collapsed;
+}
+
+bool AuthSessionSettings::archiveCollapsed() const {
+	return _variables.archiveCollapsed.current();
+}
+
+rpl::producer<bool> AuthSessionSettings::archiveCollapsedChanges() const {
+	return _variables.archiveCollapsed.changes();
+}
+
+void AuthSessionSettings::setNotifyAboutPinned(bool notify) {
+	_variables.notifyAboutPinned = notify;
+}
+
+bool AuthSessionSettings::notifyAboutPinned() const {
+	return _variables.notifyAboutPinned.current();
+}
+
+rpl::producer<bool> AuthSessionSettings::notifyAboutPinnedChanges() const {
+	return _variables.notifyAboutPinned.changes();
+}
+
 AuthSession &Auth() {
-	auto result = Core::App().authSession();
+	const auto result = Core::App().authSession();
 	Assert(result != nullptr);
 	return *result;
 }
@@ -389,6 +425,7 @@ AuthSession::AuthSession(const MTPUser &user)
 , _user(_data->processUser(user))
 , _changelogs(Core::Changelogs::Create(this))
 , _supportHelper(Support::Helper::Create(this)) {
+
 	_saveDataTimer.setCallback([=] {
 		Local::writeUserSettings();
 	});

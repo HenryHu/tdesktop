@@ -137,7 +137,9 @@ void InitField(
 		not_null<Ui::InputField*> field) {
 	field->setInstantReplaces(Ui::InstantReplaces::Default());
 	field->setInstantReplacesEnabled(Global::ReplaceEmojiValue());
-	Ui::Emoji::SuggestionsController::Init(container, field);
+	auto options = Ui::Emoji::SuggestionsController::Options();
+	options.suggestExactFirstWord = false;
+	Ui::Emoji::SuggestionsController::Init(container, field, options);
 }
 
 not_null<Ui::FlatLabel*> CreateWarningLabel(
@@ -184,6 +186,7 @@ Options::Option Options::Option::Create(
 			object_ptr<Ui::InputField>(
 				container,
 				st::createPollOptionField,
+				Ui::InputField::Mode::NoNewlines,
 				langFactory(lng_polls_create_option_add))));
 	InitField(outer, field->entity());
 	field->entity()->setMaxLength(kOptionLimit + kErrorLimit);

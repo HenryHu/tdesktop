@@ -285,7 +285,7 @@ AdminLog::OwnedItem GenerateTextItem(
 		| (out ? Flag::f_out : Flag(0));
 	const auto replyTo = 0;
 	const auto viaBotId = 0;
-	const auto item = new HistoryMessage(
+	const auto item = history->owner().makeMessage(
 		history,
 		++id,
 		flags,
@@ -755,32 +755,4 @@ bool BackgroundPreviewBox::Start(
 
 HistoryView::Context BackgroundPreviewBox::elementContext() {
 	return HistoryView::Context::ContactPreview;
-}
-
-std::unique_ptr<HistoryView::Element> BackgroundPreviewBox::elementCreate(
-		not_null<HistoryMessage*> message) {
-	return std::make_unique<HistoryView::Message>(delegate(), message);
-}
-
-std::unique_ptr<HistoryView::Element> BackgroundPreviewBox::elementCreate(
-		not_null<HistoryService*> message) {
-	Unexpected("Service message in BackgroundPreviewBox.");
-}
-
-bool BackgroundPreviewBox::elementUnderCursor(
-		not_null<const Element*> view) {
-	return false;
-}
-
-void BackgroundPreviewBox::elementAnimationAutoplayAsync(
-	not_null<const Element*> element) {
-}
-
-crl::time BackgroundPreviewBox::elementHighlightTime(
-		not_null<const Element*> element) {
-	return crl::time(0);
-}
-
-bool BackgroundPreviewBox::elementInSelectionMode() {
-	return false;
 }

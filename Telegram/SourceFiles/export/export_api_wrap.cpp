@@ -528,6 +528,7 @@ void ApiWrap::requestDialogsCount() {
 	const auto hash = 0;
 	splitRequest(_startProcess->splitIndex, MTPmessages_GetDialogs(
 		MTP_flags(0),
+		MTPint(), // folder_id
 		MTP_int(offsetDate),
 		MTP_int(offsetId),
 		offsetPeer,
@@ -1080,6 +1081,10 @@ void ApiWrap::requestSinglePeerDialog() {
 		)).done(std::move(doneSinglePeer)).send();
 	}, [&](const MTPDinputPeerSelf &data) {
 		requestUser(MTP_inputUserSelf());
+	}, [&](const MTPDinputPeerUserFromMessage &data) {
+		Unexpected("From message peer in ApiWrap::requestSinglePeerDialog.");
+	}, [&](const MTPDinputPeerChannelFromMessage &data) {
+		Unexpected("From message peer in ApiWrap::requestSinglePeerDialog.");
 	}, [](const MTPDinputPeerEmpty &data) {
 		Unexpected("Empty peer in ApiWrap::requestSinglePeerDialog.");
 	});
@@ -1097,6 +1102,7 @@ void ApiWrap::requestDialogsSlice() {
 	const auto hash = 0;
 	splitRequest(splitIndex, MTPmessages_GetDialogs(
 		MTP_flags(0),
+		MTPint(), // folder_id
 		MTP_int(_dialogsProcess->offsetDate),
 		MTP_int(_dialogsProcess->offsetId),
 		_dialogsProcess->offsetPeer,

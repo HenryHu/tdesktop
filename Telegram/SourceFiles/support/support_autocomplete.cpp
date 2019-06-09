@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_service_message.h"
 #include "history/history_message.h"
 #include "lang/lang_keys.h"
+#include "data/data_session.h"
 #include "auth_session.h"
 #include "apiwrap.h"
 #include "styles/style_chat_helpers.h"
@@ -271,7 +272,7 @@ AdminLog::OwnedItem GenerateCommentItem(
 	const auto flags = Flag::f_entities | Flag::f_from_id | Flag::f_out;
 	const auto replyTo = 0;
 	const auto viaBotId = 0;
-	const auto item = new HistoryMessage(
+	const auto item = history->owner().makeMessage(
 		history,
 		id,
 		flags,
@@ -315,7 +316,9 @@ AdminLog::OwnedItem GenerateContactItem(
 		MTP_int(0),
 		MTP_string(QString()),
 		MTP_long(0));
-	const auto item = new HistoryMessage(history, message.c_message());
+	const auto item = history->owner().makeMessage(
+		history,
+		message.c_message());
 	return AdminLog::OwnedItem(delegate, item);
 }
 
@@ -572,33 +575,6 @@ void ConfirmContactBox::paintEvent(QPaintEvent *e) {
 
 HistoryView::Context ConfirmContactBox::elementContext() {
 	return HistoryView::Context::ContactPreview;
-}
-
-std::unique_ptr<HistoryView::Element> ConfirmContactBox::elementCreate(
-		not_null<HistoryMessage*> message) {
-	return std::make_unique<HistoryView::Message>(this, message);
-}
-
-std::unique_ptr<HistoryView::Element> ConfirmContactBox::elementCreate(
-		not_null<HistoryService*> message) {
-	return std::make_unique<HistoryView::Service>(this, message);
-}
-
-bool ConfirmContactBox::elementUnderCursor(not_null<const Element*> view) {
-	return false;
-}
-
-void ConfirmContactBox::elementAnimationAutoplayAsync(
-	not_null<const Element*> element) {
-}
-
-crl::time ConfirmContactBox::elementHighlightTime(
-		not_null<const Element*> element) {
-	return crl::time(0);
-}
-
-bool ConfirmContactBox::elementInSelectionMode() {
-	return false;
 }
 
 } // namespace Support

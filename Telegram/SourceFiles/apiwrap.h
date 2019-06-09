@@ -60,16 +60,58 @@ inline int32 CountHash(IntRange &&range) {
 
 class ApiWrap : public MTP::Sender, private base::Subscriber {
 public:
+	struct Privacy {
+		enum class Key {
+			PhoneNumber,
+			LastSeen,
+			Calls,
+			Invites,
+			CallsPeer2Peer,
+			Forwards,
+			ProfilePhoto,
+		};
+		enum class Option {
+			Everyone,
+			Contacts,
+			Nobody,
+		};
+		Option option = Option::Everyone;
+		std::vector<not_null<PeerData*>> always;
+		std::vector<not_null<PeerData*>> never;
+
+		static MTPInputPrivacyKey Input(Key key);
+		static std::optional<Key> KeyFromMTP(mtpTypeId type);
+	};
+
+	struct BlockedUsersSlice {
+		struct Item {
+			UserData *user = nullptr;
+			TimeId date = 0;
+
+			bool operator==(const Item &other) const;
+			bool operator!=(const Item &other) const;
+		};
+
+		QVector<Item> list;
+		int total = 0;
+
+		bool operator==(const BlockedUsersSlice &other) const;
+		bool operator!=(const BlockedUsersSlice &other) const;
+	};
+
 	ApiWrap(not_null<AuthSession*> session);
 
 	void applyUpdates(const MTPUpdates &updates, uint64 sentMessageRandomId = 0);
+	void applyNotifySettings(
+		MTPInputNotifyPeer peer,
+		const MTPPeerNotifySettings &settings);
 
-	void savePinnedOrder();
-	//void toggleChannelGrouping( // #feed
-	//	not_null<ChannelData*> channel,
-	//	bool group,
-	//	Fn<void()> callback);
-	//void ungroupAllFromFeed(not_null<Data::Feed*> feed);
+	void savePinnedOrder(Data::Folder *folder);
+	void toggleHistoryArchived(
+		not_null<History*> history,
+		bool archived,
+		Fn<void()> callback);
+	//void ungroupAllFromFeed(not_null<Data::Feed*> feed); // #feed
 
 	using RequestMessageDataCallback = Fn<void(ChannelData*, MsgId)>;
 	void requestMessageData(
@@ -79,8 +121,13 @@ public:
 	QString exportDirectMessageLink(not_null<HistoryItem*> item);
 
 	void requestContacts();
-	void requestDialogEntry(not_null<Data::Feed*> feed);
-	//void requestFeedDialogsEntries(not_null<Data::Feed*> feed);
+	void requestDialogs(Data::Folder *folder = nullptr);
+	void requestPinnedDialogs(Data::Folder *folder = nullptr);
+	void requestMoreBlockedByDateDialogs();
+	rpl::producer<bool> dialogsLoadMayBlockByDate() const;
+	rpl::producer<bool> dialogsLoadBlockedByDate() const;
+
+	void requestDialogEntry(not_null<Data::Folder*> folder);
 	void requestDialogEntry(
 		not_null<History*> history,
 		Fn<void()> callback = nullptr);
@@ -206,8 +253,12 @@ public:
 	void updateNotifySettingsDelayed(not_null<const PeerData*> peer);
 	void saveDraftToCloudDelayed(not_null<History*> history);
 
-	void savePrivacy(const MTPInputPrivacyKey &key, QVector<MTPInputPrivacyRule> &&rules);
-	void handlePrivacyChange(mtpTypeId keyTypeId, const MTPVector<MTPPrivacyRule> &rules);
+	void savePrivacy(
+		const MTPInputPrivacyKey &key,
+		QVector<MTPInputPrivacyRule> &&rules);
+	void handlePrivacyChange(
+		Privacy::Key key,
+		const MTPVector<MTPPrivacyRule> &rules);
 	static int OnlineTillFromStatus(
 		const MTPUserStatus &status,
 		int currentOnlineTill);
@@ -309,9 +360,9 @@ public:
 	void shareContact(not_null<UserData*> user, const SendOptions &options);
 	void readServerHistory(not_null<History*> history);
 	void readServerHistoryForce(not_null<History*> history);
-	void readFeed(
-		not_null<Data::Feed*> feed,
-		Data::MessagePosition position);
+	//void readFeed( // #feed
+	//	not_null<Data::Feed*> feed,
+	//	Data::MessagePosition position);
 
 	void sendVoiceMessage(
 		QByteArray result,
@@ -393,28 +444,11 @@ public:
 
 	void saveSelfBio(const QString &text, FnMut<void()> done);
 
-	struct Privacy {
-		enum class Key {
-			LastSeen,
-			Calls,
-			Invites,
-			CallsPeer2Peer,
-			Forwards,
-			ProfilePhoto,
-		};
-		enum class Option {
-			Everyone,
-			Contacts,
-			Nobody,
-		};
-		Option option = Option::Everyone;
-		std::vector<not_null<UserData*>> always;
-		std::vector<not_null<UserData*>> never;
-
-		static MTPInputPrivacyKey Input(Key key);
-	};
 	void reloadPrivacy(Privacy::Key key);
 	rpl::producer<Privacy> privacyValue(Privacy::Key key);
+
+	void reloadBlockedUsers();
+	rpl::producer<BlockedUsersSlice> blockedUsersSlice();
 
 	void reloadSelfDestruct();
 	rpl::producer<int> selfDestructValue() const;
@@ -448,7 +482,27 @@ private:
 		crl::time received = 0;
 	};
 
-	void updatesReceived(const MTPUpdates &updates);
+	struct DialogsLoadState {
+		TimeId offsetDate = 0;
+		MsgId offsetId = 0;
+		PeerData *offsetPeer = nullptr;
+		mtpRequestId requestId = 0;
+		bool listReceived = false;
+
+		mtpRequestId pinnedRequestId = 0;
+		bool pinnedReceived = false;
+	};
+
+	void setupSupportMode();
+	void refreshDialogsLoadBlocked();
+	void updateDialogsOffset(
+		Data::Folder *folder,
+		const QVector<MTPDialog> &dialogs,
+		const QVector<MTPMessage> &messages);
+	void requestMoreDialogs(Data::Folder *folder);
+	DialogsLoadState *dialogsLoadState(Data::Folder *folder);
+	void dialogsLoadFinish(Data::Folder *folder);
+
 	void checkQuitPreventFinished();
 
 	void saveDraftsToCloud();
@@ -462,9 +516,6 @@ private:
 	QVector<MTPInputMessage> collectMessageIds(const MessageDataRequests &requests);
 	MessageDataRequests *messageDataRequests(ChannelData *channel, bool onlyExisting = false);
 	void applyPeerDialogs(const MTPmessages_PeerDialogs &dialogs);
-	void applyFeedDialogs(
-		not_null<Data::Feed*> feed,
-		const MTPmessages_Dialogs &dialogs);
 
 	void gotChatFull(
 		not_null<PeerData*> peer,
@@ -502,10 +553,6 @@ private:
 		MsgRange range,
 		const MTPupdates_ChannelDifference &result);
 
-	void notifySettingReceived(
-		MTPInputNotifyPeer peer,
-		const MTPPeerNotifySettings &settings);
-
 	void stickerSetDisenabled(mtpRequestId requestId);
 	void stickersSaveOrder();
 
@@ -522,17 +569,17 @@ private:
 		const QVector<MTPChannelParticipant> &participants);
 
 	void jumpToHistoryDate(not_null<PeerData*> peer, const QDate &date);
-	void jumpToFeedDate(not_null<Data::Feed*> feed, const QDate &date);
+	//void jumpToFeedDate(not_null<Data::Feed*> feed, const QDate &date); // #feed
 	template <typename Callback>
 	void requestMessageAfterDate(
 		not_null<PeerData*> peer,
 		const QDate &date,
 		Callback &&callback);
-	template <typename Callback>
-	void requestMessageAfterDate(
-		not_null<Data::Feed*> feed,
-		const QDate &date,
-		Callback &&callback);
+	//template <typename Callback> // #feed
+	//void requestMessageAfterDate(
+	//	not_null<Data::Feed*> feed,
+	//	const QDate &date,
+	//	Callback &&callback);
 
 	void sharedMediaDone(
 		not_null<PeerData*> peer,
@@ -601,7 +648,7 @@ private:
 		uint64 randomId);
 	FileLoadTo fileLoadTaskOptions(const SendOptions &options) const;
 
-	void readFeeds();
+	//void readFeeds(); // #feed
 
 	void getProxyPromotionDelayed(TimeId now, TimeId next);
 	void proxyPromotionDone(const MTPhelp_ProxyData &proxy);
@@ -651,8 +698,8 @@ private:
 	Fn<void(
 		const MTPchannels_ChannelParticipants&)> _channelMembersForAddCallback;
 	base::flat_map<
-		not_null<ChannelData*>,
-		std::pair<mtpRequestId,Fn<void()>>> _channelGroupingRequests;
+		not_null<History*>,
+		std::pair<mtpRequestId,Fn<void()>>> _historyArchivedRequests;
 
 	using KickRequest = std::pair<
 		not_null<ChannelData*>,
@@ -701,7 +748,7 @@ private:
 
 	mtpRequestId _contactsRequestId = 0;
 	mtpRequestId _contactsStatusesRequestId = 0;
-	base::flat_set<not_null<Data::Feed*>> _dialogFeedRequests;
+	base::flat_set<not_null<Data::Folder*>> _dialogFolderRequests;
 	base::flat_map<
 		not_null<History*>,
 		std::vector<Fn<void()>>> _dialogRequests;
@@ -720,19 +767,28 @@ private:
 
 	base::flat_map<not_null<UserData*>, mtpRequestId> _userPhotosRequests;
 
-	base::flat_set<not_null<Data::Feed*>> _feedChannelsGetRequests;
+	//base::flat_set<not_null<Data::Feed*>> _feedChannelsGetRequests; // #feed
+	//base::flat_map<
+	//	not_null<Data::Feed*>,
+	//	mtpRequestId> _feedChannelsSetRequests;
+	//base::flat_set<std::tuple<
+	//	not_null<Data::Feed*>,
+	//	Data::MessagePosition,
+	//	SliceType>> _feedMessagesRequests;
+	//base::flat_set<std::tuple<
+	//	not_null<Data::Feed*>,
+	//	Data::MessagePosition,
+	//	SliceType>> _feedMessagesRequestsPending;
+	//mtpRequestId _saveDefaultFeedIdRequest = 0;
+
+	std::unique_ptr<DialogsLoadState> _dialogsLoadState;
+	TimeId _dialogsLoadTill = 0;
+	rpl::variable<bool> _dialogsLoadMayBlockByDate = false;
+	rpl::variable<bool> _dialogsLoadBlockedByDate = false;
+
 	base::flat_map<
-		not_null<Data::Feed*>,
-		mtpRequestId> _feedChannelsSetRequests;
-	base::flat_set<std::tuple<
-		not_null<Data::Feed*>,
-		Data::MessagePosition,
-		SliceType>> _feedMessagesRequests;
-	base::flat_set<std::tuple<
-		not_null<Data::Feed*>,
-		Data::MessagePosition,
-		SliceType>> _feedMessagesRequestsPending;
-	mtpRequestId _saveDefaultFeedIdRequest = 0;
+		not_null<Data::Folder*>,
+		DialogsLoadState> _foldersLoadState;
 
 	rpl::event_stream<SendOptions> _sendActions;
 
@@ -755,9 +811,10 @@ private:
 
 	rpl::event_stream<uint64> _stickerSetInstalled;
 
-	base::flat_map<not_null<Data::Feed*>, crl::time> _feedReadsDelayed;
-	base::flat_map<not_null<Data::Feed*>, mtpRequestId> _feedReadRequests;
-	base::Timer _feedReadTimer;
+	// #feed
+	//base::flat_map<not_null<Data::Feed*>, crl::time> _feedReadsDelayed;
+	//base::flat_map<not_null<Data::Feed*>, mtpRequestId> _feedReadRequests;
+	//base::Timer _feedReadTimer;
 
 	mtpRequestId _proxyPromotionRequestId = 0;
 	std::pair<QString, uint32> _proxyPromotionKey;
@@ -803,6 +860,10 @@ private:
 	base::flat_map<Privacy::Key, mtpRequestId> _privacyRequestIds;
 	base::flat_map<Privacy::Key, Privacy> _privacyValues;
 	std::map<Privacy::Key, rpl::event_stream<Privacy>> _privacyChanges;
+
+	mtpRequestId _blockedUsersRequestId = 0;
+	std::optional<BlockedUsersSlice> _blockedUsersSlice;
+	rpl::event_stream<BlockedUsersSlice> _blockedUsersChanges;
 
 	mtpRequestId _selfDestructRequestId = 0;
 	std::optional<int> _selfDestructDays;

@@ -22,6 +22,8 @@
           '-Wno-missing-field-initializers',
           '-Wno-sign-compare',
           '-Wno-attributes',
+          '-Wno-error=class-memaccess',
+          '-Wno-error=parentheses',
         ],
       },
       'conditions': [

@@ -33,7 +33,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "observer_peer.h"
 
 TextParseOptions _confirmBoxTextOptions = {
-	TextParseLinks | TextParseMultiline | TextParseRichText, // flags
+	TextParseLinks | TextParseMultiline | TextParseMarkdown | TextParseRichText, // flags
 	0, // maxw
 	0, // maxh
 	Qt::LayoutDirectionAuto, // dir
@@ -576,7 +576,7 @@ void DeleteMessagesBox::prepare() {
 PeerData *DeleteMessagesBox::checkFromSinglePeer() const {
 	auto result = (PeerData*)nullptr;
 	for (const auto fullId : std::as_const(_ids)) {
-		if (const auto item = App::histItemById(fullId)) {
+		if (const auto item = Auth().data().message(fullId)) {
 			const auto peer = item->history()->peer;
 			if (!result) {
 				result = peer;
@@ -606,8 +606,8 @@ auto DeleteMessagesBox::revokeText(not_null<PeerData*> peer) const
 
 	const auto items = ranges::view::all(
 		_ids
-	) | ranges::view::transform([](FullMsgId id) {
-		return App::histItemById(id);
+	) | ranges::view::transform([&](FullMsgId id) {
+		return peer->owner().message(id);
 	}) | ranges::view::filter([](HistoryItem *item) {
 		return (item != nullptr);
 	}) | ranges::to_vector;
@@ -754,7 +754,7 @@ void DeleteMessagesBox::deleteAndClear() {
 
 	base::flat_map<not_null<PeerData*>, QVector<MTPint>> idsByPeer;
 	for (const auto itemId : _ids) {
-		if (const auto item = App::histItemById(itemId)) {
+		if (const auto item = Auth().data().message(itemId)) {
 			const auto history = item->history();
 			const auto wasOnServer = IsServerMsgId(item->id);
 			const auto wasLast = (history->lastMessage() == item);
@@ -790,7 +790,7 @@ ConfirmInviteBox::ConfirmInviteBox(
 	const auto status = [&] {
 		if (_participants.empty() || _participants.size() >= count) {
 			if (count > 0) {
-				return lng_chat_status_members(lt_count, count);
+				return lng_chat_status_members(lt_count_decimal, count);
 			} else {
 				return lang(_isChannel
 					? lng_channel_status

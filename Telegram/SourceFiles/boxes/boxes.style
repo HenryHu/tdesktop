@@ -718,7 +718,8 @@ adminLogFilterUserCheckbox: Checkbox(defaultBoxCheckbox) {
 	checkPosition: point(8px, 6px);
 }
 
-rightsCheckbox: Checkbox(defaultBoxCheckbox) {
+rightsCheckbox: Checkbox(defaultCheckbox) {
+	textPosition: point(10px, 1px);
 	rippleBg: attentionButtonBgOver;
 }
 rightsToggle: Toggle(defaultToggle) {
@@ -969,3 +970,10 @@ backgroundCheck: ServiceCheck {
 	color: msgServiceFg;
 	duration: 200;
 }
+
+urlAuthCheckbox: Checkbox(defaultBoxCheckbox) {
+	width: 240px;
+}
+
+linkedChatAbout: membersAbout;
+linkedChatAboutPadding: margins(20px, 20px, 20px, 20px);

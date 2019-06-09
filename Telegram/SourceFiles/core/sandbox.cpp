@@ -76,9 +76,9 @@ Sandbox::Sandbox(
 	not_null<Core::Launcher*> launcher,
 	int &argc,
 	char **argv)
-	: QApplication(argc, argv)
-	, _mainThreadId(QThread::currentThreadId())
-	, _launcher(launcher) {
+: QApplication(argc, argv)
+, _mainThreadId(QThread::currentThreadId())
+, _launcher(launcher) {
 }
 
 int Sandbox::start() {
@@ -598,3 +598,11 @@ void Sandbox::execExternal(const QString &cmd) {
 }
 
 } // namespace Core
+
+namespace crl {
+
+rpl::producer<> on_main_update_requests() {
+	return Core::Sandbox::Instance().widgetUpdateRequests();
+}
+
+} // namespace crl

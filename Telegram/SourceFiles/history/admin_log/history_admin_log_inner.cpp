@@ -506,7 +506,7 @@ bool InnerWidget::elementUnderCursor(
 void InnerWidget::elementAnimationAutoplayAsync(
 		not_null<const HistoryView::Element*> view) {
 	crl::on_main(this, [this, msgId = view->data()->fullId()] {
-		if (const auto item = App::histItemById(msgId)) {
+		if (const auto item = Auth().data().message(msgId)) {
 			if (const auto view = viewForItem(item)) {
 				if (const auto media = view->media()) {
 					media->autoplayAnimation();
@@ -523,6 +523,17 @@ crl::time InnerWidget::elementHighlightTime(
 
 bool InnerWidget::elementInSelectionMode() {
 	return false;
+}
+
+bool InnerWidget::elementIntersectsRange(
+		not_null<const Element*> view,
+		int from,
+		int till) {
+	Expects(view->delegate() == this);
+
+	const auto top = itemTop(view);
+	const auto bottom = top + view->height();
+	return (top < till && bottom > from);
 }
 
 void InnerWidget::saveState(not_null<SectionMemento*> memento) {
@@ -1065,7 +1076,7 @@ void InnerWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 		}
 	}
 
-	if (_menu->actions().isEmpty()) {
+	if (_menu->actions().empty()) {
 		_menu = nullptr;
 	} else {
 		_menu->popup(e->globalPos());
@@ -1125,9 +1136,9 @@ void InnerWidget::showContextInFolder(not_null<DocumentData*> document) {
 }
 
 void InnerWidget::openContextGif(FullMsgId itemId) {
-	if (const auto item = App::histItemById(itemId)) {
-		if (auto media = item->media()) {
-			if (auto document = media->document()) {
+	if (const auto item = Auth().data().message(itemId)) {
+		if (const auto media = item->media()) {
+			if (const auto document = media->document()) {
 				Core::App().showDocument(document, item);
 			}
 		}
@@ -1135,7 +1146,7 @@ void InnerWidget::openContextGif(FullMsgId itemId) {
 }
 
 void InnerWidget::copyContextText(FullMsgId itemId) {
-	if (const auto item = App::histItemById(itemId)) {
+	if (const auto item = Auth().data().message(itemId)) {
 		SetClipboardText(HistoryItemText(item));
 	}
 }

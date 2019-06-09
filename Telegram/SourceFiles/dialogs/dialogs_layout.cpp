@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "data/data_channel.h"
 #include "data/data_user.h"
+#include "data/data_folder.h"
 
 namespace Dialogs {
 namespace Layout {
@@ -34,7 +35,7 @@ bool ShowUserBotIcon(not_null<UserData*> user) {
 	return user->isBot() && !user->isSupport();
 }
 
-void paintRowTopRight(Painter &p, const QString &text, QRect &rectForName, bool active, bool selected) {
+void PaintRowTopRight(Painter &p, const QString &text, QRect &rectForName, bool active, bool selected) {
 	const auto width = st::dialogsDateFont->width(text);
 	rectForName.setWidth(rectForName.width() - width - st::dialogsDateSkip);
 	p.setFont(st::dialogsDateFont);
@@ -42,7 +43,7 @@ void paintRowTopRight(Painter &p, const QString &text, QRect &rectForName, bool 
 	p.drawText(rectForName.left() + rectForName.width() + st::dialogsDateSkip, rectForName.top() + st::msgNameFont->height - st::msgDateFont->descent, text);
 }
 
-void paintRowDate(Painter &p, QDateTime date, QRect &rectForName, bool active, bool selected) {
+void PaintRowDate(Painter &p, QDateTime date, QRect &rectForName, bool active, bool selected) {
 	const auto now = QDateTime::currentDateTime();
 	const auto &lastTime = date;
 	const auto nowDate = now.date();
@@ -60,7 +61,7 @@ void paintRowDate(Painter &p, QDateTime date, QRect &rectForName, bool active, b
 			return lastDate.toString(qsl("d.MM.yy"));
 		}
 	}();
-	paintRowTopRight(p, dt, rectForName, active, selected);
+	PaintRowTopRight(p, dt, rectForName, active, selected);
 }
 
 void PaintNarrowCounter(
@@ -70,16 +71,14 @@ void PaintNarrowCounter(
 		bool displayMentionBadge,
 		int unreadCount,
 		bool active,
-		bool unreadMuted) {
+		bool unreadMuted,
+		bool mentionMuted) {
 	auto skipBeforeMention = 0;
 	if (displayUnreadCounter || displayUnreadMark) {
 		auto counter = (unreadCount > 0)
 			? QString::number(unreadCount)
 			: QString();
 		const auto allowDigits = displayMentionBadge ? 1 : 3;
-		if (counter.size() > allowDigits + 1) {
-			counter = qsl("..") + counter.mid(counter.size() - allowDigits);
-		}
 		auto unreadRight = st::dialogsPadding.x() + st::dialogsPhotoSize;
 		auto unreadTop = st::dialogsPadding.y() + st::dialogsPhotoSize - st::dialogsUnreadHeight;
 		auto unreadWidth = 0;
@@ -87,7 +86,7 @@ void PaintNarrowCounter(
 		UnreadBadgeStyle st;
 		st.active = active;
 		st.muted = unreadMuted;
-		paintUnreadCount(p, counter, unreadRight, unreadTop, st, &unreadWidth);
+		paintUnreadCount(p, counter, unreadRight, unreadTop, st, &unreadWidth, allowDigits);
 		skipBeforeMention += unreadWidth + st.padding;
 	}
 	if (displayMentionBadge) {
@@ -98,7 +97,7 @@ void PaintNarrowCounter(
 
 		UnreadBadgeStyle st;
 		st.active = active;
-		st.muted = false;
+		st.muted = mentionMuted;
 		st.padding = 0;
 		st.textTop = 0;
 		paintUnreadCount(p, counter, unreadRight, unreadTop, st, &unreadWidth);
@@ -117,7 +116,8 @@ int PaintWideCounter(
 		int unreadCount,
 		bool active,
 		bool selected,
-		bool unreadMuted) {
+		bool unreadMuted,
+		bool mentionMuted) {
 	const auto initial = availableWidth;
 	auto hadOneBadge = false;
 	if (displayUnreadCounter || displayUnreadMark) {
@@ -150,7 +150,7 @@ int PaintWideCounter(
 
 		UnreadBadgeStyle st;
 		st.active = active;
-		st.muted = false;
+		st.muted = mentionMuted;
 		st.padding = 0;
 		st.textTop = 0;
 		paintUnreadCount(p, counter, unreadRight, unreadTop, st, &unreadWidth);
@@ -159,13 +159,50 @@ int PaintWideCounter(
 	return availableWidth;
 }
 
+void PaintListEntryText(
+		Painter &p,
+		QRect rect,
+		bool active,
+		bool selected,
+		not_null<const Row*> row) {
+	if (rect.isEmpty()) {
+		return;
+	}
+	row->validateListEntryCache();
+	const auto &palette = row->folder()
+		? (active
+			? st::dialogsTextPaletteArchiveActive
+			: selected
+			? st::dialogsTextPaletteArchiveOver
+			: st::dialogsTextPaletteArchive)
+		: (active
+			? st::dialogsTextPaletteActive
+			: selected
+			? st::dialogsTextPaletteOver
+			: st::dialogsTextPalette);
+	const auto &color = active
+		? st::dialogsTextFgActive
+		: selected
+		? st::dialogsTextFgOver
+		: st::dialogsTextFg;
+	p.setTextPalette(palette);
+	p.setFont(st::dialogsTextFont);
+	p.setPen(color);
+	row->listEntryCache().drawElided(
+		p,
+		rect.left(),
+		rect.top(),
+		rect.width(),
+		rect.height() / st::dialogsTextFont->height);
+	p.restoreTextPalette();
+}
+
 enum class Flag {
 	Active           = 0x01,
 	Selected         = 0x02,
-	OnlyBackground   = 0x04,
-	SearchResult     = 0x08,
-	SavedMessages    = 0x10,
-	FeedSearchResult = 0x20,
+	SearchResult     = 0x04,
+	SavedMessages    = 0x08,
+	//FeedSearchResult = 0x10, // #feed
 };
 inline constexpr bool is_flag_type(Flag) { return true; }
 
@@ -203,10 +240,6 @@ void paintRow(
 		: st::dialogsRippleBg;
 	p.fillRect(fullRect, bg);
 	row->paintRipple(p, 0, 0, fullWidth, &ripple->c);
-
-	if (flags & Flag::OnlyBackground) {
-		return;
-	}
 
 	if (flags & Flag::SavedMessages) {
 		Ui::EmptyUserpic::PaintSavedMessages(
@@ -256,21 +289,21 @@ void paintRow(
 		namewidth,
 		st::msgNameFont->height);
 
-	const auto promoted = chat.entry()->useProxyPromotion()
-		&& !(flags & (Flag::SearchResult | Flag::FeedSearchResult));
+	const auto promoted = (history && history->useProxyPromotion())
+		&& !(flags & (Flag::SearchResult/* | Flag::FeedSearchResult*/)); // #feed
 	if (promoted) {
 		const auto text = lang(lng_proxy_sponsor);
-		paintRowTopRight(p, text, rectForName, active, selected);
-	} else if (from && !(flags & Flag::FeedSearchResult)) {
+		PaintRowTopRight(p, text, rectForName, active, selected);
+	} else if (from/* && !(flags & Flag::FeedSearchResult)*/) { // #feed
 		if (const auto chatTypeIcon = ChatTypeIcon(from, active, selected)) {
 			chatTypeIcon->paint(p, rectForName.topLeft(), fullWidth);
 			rectForName.setLeft(rectForName.left() + st::dialogsChatTypeSkip);
 		}
-	} else if (const auto feed = chat.feed()) {
-		if (const auto feedTypeIcon = FeedTypeIcon(feed, active, selected)) {
-			feedTypeIcon->paint(p, rectForName.topLeft(), fullWidth);
-			rectForName.setLeft(rectForName.left() + st::dialogsChatTypeSkip);
-		}
+	//} else if (const auto feed = chat.feed()) { // #feed
+	//	if (const auto feedTypeIcon = FeedTypeIcon(feed, active, selected)) {
+	//		feedTypeIcon->paint(p, rectForName.topLeft(), fullWidth);
+	//		rectForName.setLeft(rectForName.left() + st::dialogsChatTypeSkip);
+	//	}
 	}
 	auto texttop = st::dialogsPadding.y()
 		+ st::msgNameFont->height
@@ -279,11 +312,11 @@ void paintRow(
 		|| (supportMode
 			&& Auth().supportHelper().isOccupiedBySomeone(history))) {
 		if (!promoted) {
-			paintRowDate(p, date, rectForName, active, selected);
+			PaintRowDate(p, date, rectForName, active, selected);
 		}
 
 		auto availableWidth = namewidth;
-		if (entry->isPinnedDialog()) {
+		if (entry->isPinnedDialog() && !entry->fixedOnTopIndex()) {
 			auto &icon = (active ? st::dialogsPinnedIconActive : (selected ? st::dialogsPinnedIconOver : st::dialogsPinnedIcon));
 			icon.paint(p, fullWidth - st::dialogsPadding.x() - icon.width(), texttop, fullWidth);
 			availableWidth -= icon.width() + st::dialogsUnreadPadding;
@@ -310,7 +343,7 @@ void paintRow(
 		}
 	} else if (!item) {
 		auto availableWidth = namewidth;
-		if (entry->isPinnedDialog()) {
+		if (entry->isPinnedDialog() && !entry->fixedOnTopIndex()) {
 			auto &icon = (active ? st::dialogsPinnedIconActive : (selected ? st::dialogsPinnedIconOver : st::dialogsPinnedIcon));
 			icon.paint(p, fullWidth - st::dialogsPadding.x() - icon.width(), texttop, fullWidth);
 			availableWidth -= icon.width() + st::dialogsUnreadPadding;
@@ -322,12 +355,12 @@ void paintRow(
 			// Empty history
 		}
 	} else if (!item->isEmpty()) {
-		if (!promoted) {
-			paintRowDate(p, date, rectForName, active, selected);
+		if (history && !promoted) {
+			PaintRowDate(p, date, rectForName, active, selected);
 		}
 
 		paintItemCallback(nameleft, namewidth);
-	} else if (entry->isPinnedDialog()) {
+	} else if (entry->isPinnedDialog() && !entry->fixedOnTopIndex()) {
 		auto availableWidth = namewidth;
 		auto &icon = (active ? st::dialogsPinnedIconActive : (selected ? st::dialogsPinnedIconOver : st::dialogsPinnedIcon));
 		icon.paint(p, fullWidth - st::dialogsPadding.x() - icon.width(), texttop, fullWidth);
@@ -394,6 +427,12 @@ void paintRow(
 	} else if (hiddenSenderInfo) {
 		hiddenSenderInfo->nameText.drawElided(p, rectForName.left(), rectForName.top(), rectForName.width());
 	} else {
+		const auto nameFg = active
+			? st::dialogsNameFgActive
+			: (selected
+				? st::dialogsArchiveFgOver
+				: st::dialogsArchiveFg);
+		p.setPen(nameFg);
 		p.setFont(st::msgNameFont);
 		auto text = entry->chatListName(); // TODO feed name with emoji
 		auto textWidth = st::msgNameFont->width(text);
@@ -462,14 +501,14 @@ const style::icon *ChatTypeIcon(
 	return nullptr;
 }
 
-const style::icon *FeedTypeIcon(
-		not_null<Data::Feed*> feed,
-		bool active,
-		bool selected) {
-	return &(active ? st::dialogsFeedIconActive
-		: (selected ? st::dialogsFeedIconOver : st::dialogsFeedIcon));
-}
-
+//const style::icon *FeedTypeIcon( // #feed
+//		not_null<Data::Feed*> feed,
+//		bool active,
+//		bool selected) {
+//	return &(active ? st::dialogsFeedIconActive
+//		: (selected ? st::dialogsFeedIconOver : st::dialogsFeedIcon));
+//}
+//
 void paintUnreadBadge(Painter &p, const QRect &rect, const UnreadBadgeStyle &st) {
 	Assert(rect.height() == st.size);
 
@@ -511,11 +550,16 @@ UnreadBadgeStyle::UnreadBadgeStyle()
 
 void paintUnreadCount(
 		Painter &p,
-		const QString &text,
+		const QString &unreadCount,
 		int x,
 		int y,
 		const UnreadBadgeStyle &st,
-		int *outUnreadWidth) {
+		int *outUnreadWidth,
+		int allowDigits) {
+	const auto text = (allowDigits > 0) && (unreadCount.size() > allowDigits + 1)
+		? qsl("..") + unreadCount.mid(unreadCount.size() - allowDigits)
+		: unreadCount;
+
 	int unreadWidth = st.font->width(text);
 	int unreadRectWidth = unreadWidth + 2 * st.padding;
 	int unreadRectHeight = st.size;
@@ -546,7 +590,6 @@ void RowPainter::paint(
 		int fullWidth,
 		bool active,
 		bool selected,
-		bool onlyBackground,
 		crl::time ms) {
 	const auto entry = row->entry();
 	const auto history = row->history();
@@ -554,6 +597,7 @@ void RowPainter::paint(
 	const auto unreadCount = entry->chatListUnreadCount();
 	const auto unreadMark = entry->chatListUnreadMark();
 	const auto unreadMuted = entry->chatListMutedBadge();
+	const auto mentionMuted = (entry->folder() != nullptr);
 	const auto item = entry->chatListMessage();
 	const auto cloudDraft = [&]() -> const Data::Draft*{
 		if (history && (!item || (!unreadCount && !unreadMark))) {
@@ -566,7 +610,7 @@ void RowPainter::paint(
 		}
 		return nullptr;
 	}();
-	const auto displayDate = [item, cloudDraft] {
+	const auto displayDate = [&] {
 		if (item) {
 			if (cloudDraft) {
 				return (item->date() > cloudDraft->date)
@@ -596,7 +640,8 @@ void RowPainter::paint(
 	const auto displayPinnedIcon = !displayUnreadCounter
 		&& !displayMentionBadge
 		&& !displayUnreadMark
-		&& entry->isPinnedDialog();
+		&& entry->isPinnedDialog()
+		&& !entry->fixedOnTopIndex();
 
 	const auto from = history
 		? (history->peer->migrateTo()
@@ -605,7 +650,6 @@ void RowPainter::paint(
 		: nullptr;
 	const auto flags = (active ? Flag::Active : Flag(0))
 		| (selected ? Flag::Selected : Flag(0))
-		| (onlyBackground ? Flag::OnlyBackground : Flag(0))
 		| (peer && peer->isSelf() ? Flag::SavedMessages : Flag(0));
 	const auto paintItemCallback = [&](int nameleft, int namewidth) {
 		const auto texttop = st::dialogsPadding.y()
@@ -623,26 +667,29 @@ void RowPainter::paint(
 			unreadCount,
 			active,
 			selected,
-			unreadMuted);
+			unreadMuted,
+			mentionMuted);
 		const auto &color = active
 			? st::dialogsTextFgServiceActive
 			: (selected
 				? st::dialogsTextFgServiceOver
 				: st::dialogsTextFgService);
-		const auto actionWasPainted = history ? history->paintSendAction(
-			p,
+		const auto itemRect = QRect(
 			nameleft,
 			texttop,
 			availableWidth,
+			st::dialogsTextFont->height);
+		const auto actionWasPainted = history ? history->paintSendAction(
+			p,
+			itemRect.x(),
+			itemRect.y(),
+			itemRect.width(),
 			fullWidth,
 			color,
 			ms) : false;
-		if (!actionWasPainted) {
-			const auto itemRect = QRect(
-				nameleft,
-				texttop,
-				availableWidth,
-				st::dialogsTextFont->height);
+		if (const auto folder = row->folder()) {
+			PaintListEntryText(p, itemRect, active, selected, row);
+		} else if (!actionWasPainted) {
 			item->drawInDialog(
 				p,
 				itemRect,
@@ -661,7 +708,8 @@ void RowPainter::paint(
 			displayMentionBadge,
 			unreadCount,
 			active,
-			unreadMuted);
+			unreadMuted,
+			mentionMuted);
 	};
 	paintRow(
 		p,
@@ -686,21 +734,14 @@ void RowPainter::paint(
 		int fullWidth,
 		bool active,
 		bool selected,
-		bool onlyBackground,
 		crl::time ms,
 		bool displayUnreadInfo) {
 	auto item = row->item();
 	auto history = item->history();
 	auto cloudDraft = nullptr;
 	const auto from = [&] {
-		if (const auto searchChat = row->searchInChat()) {
-			if (const auto peer = searchChat.peer()) {
-				if (peer->isSelf()) {
-					return item->senderOriginal();
-				} else if (!peer->isChannel() || peer->isMegagroup()) {
-					return item->from().get();
-				}
-			}
+		if (row->searchInChat()) {
+			return item->displayFrom();
 		}
 		return history->peer->migrateTo()
 			? history->peer->migrateTo()
@@ -733,6 +774,7 @@ void RowPainter::paint(
 	const auto unreadMark = displayUnreadInfo
 		&& history->chatListUnreadMark();
 	const auto unreadMuted = history->chatListMutedBadge();
+	const auto mentionMuted = (history->folder() != nullptr);
 	const auto displayMentionBadge = displayUnreadInfo
 		&& history->hasUnreadMentions();
 	const auto displayUnreadCounter = (unreadCount > 0);
@@ -757,7 +799,8 @@ void RowPainter::paint(
 			unreadCount,
 			active,
 			selected,
-			unreadMuted);
+			unreadMuted,
+			mentionMuted);
 
 		const auto itemRect = QRect(
 			nameleft,
@@ -781,16 +824,16 @@ void RowPainter::paint(
 			displayMentionBadge,
 			unreadCount,
 			active,
-			unreadMuted);
+			unreadMuted,
+			mentionMuted);
 	};
 	const auto showSavedMessages = history->peer->isSelf()
 		&& !row->searchInChat();
 	const auto flags = (active ? Flag::Active : Flag(0))
 		| (selected ? Flag::Selected : Flag(0))
-		| (onlyBackground ? Flag::OnlyBackground : Flag(0))
 		| Flag::SearchResult
-		| (showSavedMessages ? Flag::SavedMessages : Flag(0))
-		| (row->searchInChat().feed() ? Flag::FeedSearchResult : Flag(0));
+		| (showSavedMessages ? Flag::SavedMessages : Flag(0))/* // #feed
+		| (row->searchInChat().feed() ? Flag::FeedSearchResult : Flag(0))*/;
 	paintRow(
 		p,
 		row,
@@ -815,29 +858,44 @@ QRect RowPainter::sendActionAnimationRect(int animationWidth, int animationHeigh
 	return QRect(nameleft, texttop, textUpdated ? namewidth : animationWidth, animationHeight);
 }
 
-void paintImportantSwitch(Painter &p, Mode current, int fullWidth, bool selected, bool onlyBackground) {
+void PaintCollapsedRow(
+		Painter &p,
+		const RippleRow &row,
+		Data::Folder *folder,
+		const QString &text,
+		int unread,
+		int fullWidth,
+		bool selected) {
 	p.fillRect(0, 0, fullWidth, st::dialogsImportantBarHeight, selected ? st::dialogsBgOver : st::dialogsBg);
-	if (onlyBackground) {
-		return;
-	}
 
-	p.setFont(st::semiboldFont);
-	p.setPen(st::dialogsNameFg);
+	row.paintRipple(p, 0, 0, fullWidth);
+
+	const auto smallWidth = st::dialogsPadding.x()
+		+ st::dialogsPhotoSize
+		+ st::dialogsPhotoPadding;
+	const auto narrow = (fullWidth <= smallWidth);
 
 	const auto unreadTop = (st::dialogsImportantBarHeight - st::dialogsUnreadHeight) / 2;
-	const auto mutedHidden = (current == Dialogs::Mode::Important);
-	const auto text = lang(mutedHidden
-		? lng_dialogs_show_all_chats
-		: lng_dialogs_hide_muted_chats);
-	const auto textBaseline = unreadTop
-		+ (st::dialogsUnreadHeight - st::dialogsUnreadFont->height) / 2
-		+ st::dialogsUnreadFont->ascent;
-	p.drawText(st::dialogsPadding.x(), textBaseline, text);
+	if (!narrow || !folder) {
+		p.setFont(st::semiboldFont);
+		p.setPen(st::dialogsNameFg);
 
-	if (!mutedHidden) {
-		return;
+		const auto textBaseline = unreadTop
+			+ (st::dialogsUnreadHeight - st::dialogsUnreadFont->height) / 2
+			+ st::dialogsUnreadFont->ascent;
+		const auto left = narrow
+			? ((fullWidth - st::semiboldFont->width(text)) / 2)
+			: st::dialogsPadding.x();
+		p.drawText(left, textBaseline, text);
+	} else {
+		folder->paintUserpicLeft(
+			p,
+			(fullWidth - st::dialogsUnreadHeight) / 2,
+			unreadTop,
+			fullWidth,
+			st::dialogsUnreadHeight);
 	}
-	if (const auto unread = Auth().data().unreadOnlyMutedBadge()) {
+	if (!narrow && unread) {
 		const auto unreadRight = fullWidth - st::dialogsPadding.x();
 		UnreadBadgeStyle st;
 		st.muted = true;

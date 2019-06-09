@@ -65,6 +65,7 @@ struct Instance::Streamed {
 	Streaming::Player player;
 	Streaming::Information info;
 	View::PlaybackProgress progress;
+	bool clearing = false;
 };
 
 Instance::Streamed::Streamed(
@@ -150,9 +151,7 @@ void Instance::setCurrent(const AudioMsgId &audioId) {
 		data->current = audioId;
 		data->isPlaying = false;
 
-		const auto history = data->history;
-		const auto migrated = data->migrated;
-		const auto item = App::histItemById(data->current.contextId());
+		const auto item = Auth().data().message(data->current.contextId());
 		if (item) {
 			data->history = item->history()->migrateToOrMe();
 			data->migrated = data->history->migrateFrom();
@@ -166,9 +165,10 @@ void Instance::setCurrent(const AudioMsgId &audioId) {
 }
 
 void Instance::clearStreamed(not_null<Data*> data) {
-	if (!data->streamed) {
+	if (!data->streamed || data->streamed->clearing) {
 		return;
 	}
+	data->streamed->clearing = true;
 	data->streamed->player.stop();
 	data->isPlaying = false;
 	requestRoundVideoResize();
@@ -273,7 +273,7 @@ HistoryItem *Instance::itemByIndex(not_null<Data*> data, int index) {
 		return nullptr;
 	}
 	const auto fullId = (*data->playlistSlice)[index];
-	return App::histItemById(fullId);
+	return Auth().data().message(fullId);
 }
 
 bool Instance::moveInPlaylist(
@@ -616,7 +616,7 @@ void Instance::emitUpdate(AudioMsgId::Type type, CheckCallback check) {
 		if (data->streamed && !data->streamed->info.video.size.isEmpty()) {
 			data->streamed->progress.updateState(state);
 		}
-		_updatedNotifier.notify(state, true);
+		_updatedNotifier.fire_copy({state});
 		if (data->isPlaying && state.state == State::StoppedAtEnd) {
 			if (data->repeatEnabled) {
 				play(data->current);
@@ -716,9 +716,8 @@ HistoryItem *Instance::roundVideoItem() const {
 	const auto data = getData(AudioMsgId::Type::Voice);
 	return (data->streamed
 		&& !data->streamed->info.video.size.isEmpty())
-		? App::histItemById(data->streamed->id.contextId())
+		? Auth().data().message(data->streamed->id.contextId())
 		: nullptr;
-
 }
 
 void Instance::requestRoundVideoResize() const {
