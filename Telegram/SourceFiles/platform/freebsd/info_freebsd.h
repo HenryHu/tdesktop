@@ -7,8 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include <sys/utsname.h>
-
 #include "platform/platform_info.h"
 
 namespace Platform {
@@ -18,19 +16,19 @@ inline constexpr bool IsLinux() {
 }
 
 inline constexpr bool IsLinux32Bit() {
-    struct utsname name;
-    if (uname(&name) != 0) {
-        return false;
-    }
-    return strcmp(name.machine, "i386") == 0;
+#ifdef Q_OS_LINUX32
+	return true;
+#else // Q_OS_LINUX32
+	return false;
+#endif // Q_OS_LINUX32
 }
 
 inline constexpr bool IsLinux64Bit() {
-    struct utsname name;
-    if (uname(&name) != 0) {
-        return true;
-    }
-    return strcmp(name.machine, "amd64") == 0;
+#ifdef Q_OS_LINUX64
+	return true;
+#else // Q_OS_LINUX64
+	return false;
+#endif // Q_OS_LINUX64
 }
 
 inline constexpr bool IsWindows() { return false; }

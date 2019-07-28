@@ -577,8 +577,8 @@
 <(src_loc)/platform/linux/linux_libs.h
 <(src_loc)/platform/linux/file_utilities_linux.cpp
 <(src_loc)/platform/linux/file_utilities_linux.h
-<(src_loc)/platform/linux/info_linux.cpp
-<(src_loc)/platform/linux/info_linux.h
+<(src_loc)/platform/freebsd/info_freebsd.cpp
+<(src_loc)/platform/freebsd/info_freebsd.h
 <(src_loc)/platform/linux/launcher_linux.cpp
 <(src_loc)/platform/linux/launcher_linux.h
 <(src_loc)/platform/linux/main_window_linux.cpp
