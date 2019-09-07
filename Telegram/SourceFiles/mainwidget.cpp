@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_channel.h"
 #include "data/data_chat.h"
 #include "data/data_user.h"
+#include "data/data_scheduled_messages.h"
 #include "ui/special_buttons.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/shadow.h"
@@ -36,6 +37,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/section_memento.h"
 #include "window/section_widget.h"
 #include "window/window_connecting_widget.h"
+#include "chat_helpers/tabbed_selector.h" // TabbedSelector::refreshStickers
 #include "chat_helpers/message_field.h"
 #include "chat_helpers/stickers.h"
 #include "info/info_memento.h"
@@ -47,7 +49,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/history_widget.h"
 #include "history/history_message.h"
-#include "history/media/history_media.h"
+#include "history/view/media/history_view_media.h"
 #include "history/view/history_view_service_message.h"
 #include "history/view/history_view_element.h"
 #include "lang/lang_keys.h"
@@ -83,12 +85,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/update_checker.h"
 #include "core/shortcuts.h"
 #include "core/application.h"
+#include "base/unixtime.h"
 #include "calls/calls_instance.h"
 #include "calls/calls_top_bar.h"
 #include "export/export_settings.h"
 #include "export/view/export_view_top_bar.h"
 #include "export/view/export_view_panel_controller.h"
-#include "auth_session.h"
+#include "main/main_session.h"
 #include "support/support_helper.h"
 #include "storage/storage_facade.h"
 #include "storage/storage_shared_media.h"
@@ -155,7 +158,7 @@ bool HasForceLogoutNotification(const MTPUpdates &updates) {
 }
 
 bool ForwardedInfoDataLoaded(
-		not_null<AuthSession*> session,
+		not_null<Main::Session*> session,
 		const MTPMessageFwdHeader &header) {
 	return header.match([&](const MTPDmessageFwdHeader &data) {
 		if (const auto channelId = data.vchannel_id()) {
@@ -180,7 +183,7 @@ bool ForwardedInfoDataLoaded(
 }
 
 bool MentionUsersLoaded(
-		not_null<AuthSession*> session,
+		not_null<Main::Session*> session,
 		const MTPVector<MTPMessageEntity> &entities) {
 	for (const auto &entity : entities.v) {
 		auto type = entity.type();
@@ -201,7 +204,7 @@ bool MentionUsersLoaded(
 }
 
 DataIsLoadedResult AllDataLoadedForMessage(
-		not_null<AuthSession*> session,
+		not_null<Main::Session*> session,
 		const MTPMessage &message) {
 	return message.match([&](const MTPDmessage &message) {
 		if (const auto fromId = message.vfrom_id()) {
@@ -487,7 +490,7 @@ MainWidget::MainWidget(
 	}
 }
 
-AuthSession &MainWidget::session() const {
+Main::Session &MainWidget::session() const {
 	return _controller->session();
 }
 
@@ -594,9 +597,10 @@ bool MainWidget::setForwardDraft(PeerId peerId, MessageIdsList &&items) {
 	Expects(peerId != 0);
 
 	const auto peer = session().data().peer(peerId);
-	const auto error = GetErrorTextForForward(
+	const auto error = GetErrorTextForSending(
 		peer,
-		session().data().idsToItems(items));
+		session().data().idsToItems(items),
+		true);
 	if (!error.isEmpty()) {
 		Ui::show(Box<InformBox>(error), LayerOption::KeepOther);
 		return false;
@@ -677,11 +681,16 @@ void MainWidget::cancelForwarding(not_null<History*> history) {
 	_history->updateForwarding();
 }
 
-void MainWidget::finishForwarding(not_null<History*> history) {
+void MainWidget::finishForwarding(Api::SendAction action) {
+	const auto history = action.history;
 	auto toForward = history->validateForwardDraft();
 	if (!toForward.empty()) {
-		auto options = ApiWrap::SendOptions(history);
-		session().api().forwardMessages(std::move(toForward), options);
+		const auto error = GetErrorTextForSending(history->peer, toForward);
+		if (!error.isEmpty()) {
+			return;
+		}
+
+		session().api().forwardMessages(std::move(toForward), action);
 		cancelForwarding(history);
 	}
 
@@ -915,23 +924,6 @@ bool MainWidget::selectingPeer() const {
 
 void MainWidget::removeDialog(Dialogs::Key key) {
 	_dialogs->removeDialog(key);
-}
-
-bool MainWidget::sendMessageFail(const RPCError &error) {
-	if (MTP::isDefaultHandledError(error)) return false;
-
-	if (error.type() == qstr("PEER_FLOOD")) {
-		Ui::show(Box<InformBox>(PeerFloodErrorText(PeerFloodType::Send)));
-		return true;
-	} else if (error.type() == qstr("USER_BANNED_IN_CHANNEL")) {
-		const auto link = textcmdLink(
-			Core::App().createInternalLinkFull(qsl("spambot")),
-			tr::lng_cant_more_info(tr::now));
-		const auto text = tr::lng_error_public_groups_denied(tr::now, lt_more_info, link);
-		Ui::show(Box<InformBox>(text));
-		return true;
-	}
-	return false;
 }
 
 void MainWidget::cacheBackground() {
@@ -1676,11 +1668,7 @@ void MainWidget::ui_showPeerHistory(
 
 	auto noPeer = !_history->peer();
 	auto onlyDialogs = noPeer && Adaptive::OneColumn();
-	if (_mainSection) {
-		_mainSection->hide();
-		_mainSection->deleteLater();
-		_mainSection = nullptr;
-	}
+	_mainSection.destroy();
 
 	updateControlsGeometry();
 
@@ -1978,11 +1966,6 @@ void MainWidget::showNewSection(
 		}
 		updateControlsGeometry();
 	} else {
-		if (_mainSection) {
-			_mainSection->hide();
-			_mainSection->deleteLater();
-			_mainSection = nullptr;
-		}
 		_mainSection = std::move(newMainSection);
 		updateControlsGeometry();
 		_history->finishAnimating();
@@ -2213,12 +2196,6 @@ void MainWidget::historyToDown(History *history) {
 
 void MainWidget::dialogsToUp() {
 	_dialogs->jumpToTop();
-}
-
-void MainWidget::newUnreadMsg(
-		not_null<History*> history,
-		not_null<HistoryItem*> item) {
-	_history->newUnreadMsg(history, item);
 }
 
 void MainWidget::markActiveHistoryAsRead() {
@@ -2695,6 +2672,12 @@ void MainWidget::updateMediaPlaylistPosition(int x) {
 
 int MainWidget::contentScrollAddToY() const {
 	return _contentScrollAddToY;
+}
+
+void MainWidget::returnTabbedSelector() {
+	if (!_mainSection || !_mainSection->returnTabbedSelector()) {
+		_history->returnTabbedSelector();
+	}
 }
 
 void MainWidget::keyPressEvent(QKeyEvent *e) {
@@ -3252,9 +3235,11 @@ void MainWidget::openPeerByName(
 
 	if (const auto peer = session().data().peerByUsername(username)) {
 		if (msgId == ShowAtGameShareMsgId) {
-			if (peer->isUser() && peer->asUser()->botInfo && !startToken.isEmpty()) {
+			if (peer->isUser() && peer->asUser()->isBot() && !startToken.isEmpty()) {
 				peer->asUser()->botInfo->shareGameShortName = startToken;
-				AddBotToGroupBoxController::Start(peer->asUser());
+				AddBotToGroupBoxController::Start(
+					_controller,
+					peer->asUser());
 			} else {
 				InvokeQueued(this, [this, peer] {
 					_controller->showPeerHistory(
@@ -3263,10 +3248,12 @@ void MainWidget::openPeerByName(
 				});
 			}
 		} else if (msgId == ShowAtProfileMsgId && !peer->isChannel()) {
-			if (peer->isUser() && peer->asUser()->botInfo && !peer->asUser()->botInfo->cantJoinGroups && !startToken.isEmpty()) {
+			if (peer->isUser() && peer->asUser()->isBot() && !peer->asUser()->botInfo->cantJoinGroups && !startToken.isEmpty()) {
 				peer->asUser()->botInfo->startGroupToken = startToken;
-				AddBotToGroupBoxController::Start(peer->asUser());
-			} else if (peer->isUser() && peer->asUser()->botInfo) {
+				AddBotToGroupBoxController::Start(
+					_controller,
+					peer->asUser());
+			} else if (peer->isUser() && peer->asUser()->isBot()) {
 				// Always open bot chats, even from mention links.
 				InvokeQueued(this, [this, peer] {
 					_controller->showPeerHistory(
@@ -3280,7 +3267,7 @@ void MainWidget::openPeerByName(
 			if (msgId == ShowAtProfileMsgId || !peer->isChannel()) { // show specific posts only in channels / supergroups
 				msgId = ShowAtUnreadMsgId;
 			}
-			if (peer->isUser() && peer->asUser()->botInfo) {
+			if (peer->isUser() && peer->asUser()->isBot()) {
 				peer->asUser()->botInfo->startToken = startToken;
 				if (peer == _history->peer()) {
 					_history->updateControlsVisibility();
@@ -3325,10 +3312,12 @@ void MainWidget::usernameResolveDone(QPair<MsgId, QString> msgIdAndStartToken, c
 	MsgId msgId = msgIdAndStartToken.first;
 	QString startToken = msgIdAndStartToken.second;
 	if (msgId == ShowAtProfileMsgId && !peer->isChannel()) {
-		if (peer->isUser() && peer->asUser()->botInfo && !peer->asUser()->botInfo->cantJoinGroups && !startToken.isEmpty()) {
+		if (peer->isUser() && peer->asUser()->isBot() && !peer->asUser()->botInfo->cantJoinGroups && !startToken.isEmpty()) {
 			peer->asUser()->botInfo->startGroupToken = startToken;
-			AddBotToGroupBoxController::Start(peer->asUser());
-		} else if (peer->isUser() && peer->asUser()->botInfo) {
+			AddBotToGroupBoxController::Start(
+				_controller,
+				peer->asUser());
+		} else if (peer->isUser() && peer->asUser()->isBot()) {
 			// Always open bot chats, even from mention links.
 			InvokeQueued(this, [this, peer] {
 				_controller->showPeerHistory(
@@ -3342,7 +3331,7 @@ void MainWidget::usernameResolveDone(QPair<MsgId, QString> msgIdAndStartToken, c
 		if (msgId == ShowAtProfileMsgId || !peer->isChannel()) { // show specific posts only in channels / supergroups
 			msgId = ShowAtUnreadMsgId;
 		}
-		if (peer->isUser() && peer->asUser()->botInfo) {
+		if (peer->isUser() && peer->asUser()->isBot()) {
 			peer->asUser()->botInfo->startToken = startToken;
 			if (peer == _history->peer()) {
 				_history->updateControlsVisibility();
@@ -3417,7 +3406,7 @@ void MainWidget::incrementSticker(DocumentData *sticker) {
 	}
 	if (index) {
 		if (it->dates.size() == it->stickers.size()) {
-			it->dates.insert(it->dates.begin(), unixtime());
+			it->dates.insert(it->dates.begin(), base::unixtime::now());
 		}
 		it->stickers.push_front(sticker);
 		if (const auto emojiList = Stickers::GetEmojiListFromSet(sticker)) {
@@ -3474,7 +3463,7 @@ void MainWidget::incrementSticker(DocumentData *sticker) {
 	if (writeRecentStickers) {
 		Local::writeRecentStickers();
 	}
-	_history->updateRecentStickers();
+	_controller->tabbedSelector()->refreshStickers();
 }
 
 void MainWidget::activate() {
@@ -3579,7 +3568,7 @@ void MainWidget::updateOnline(bool gotOtherOffline) {
 		}
 
 		const auto self = session().user();
-		self->onlineTill = unixtime() + (isOnline ? (Global::OnlineUpdatePeriod() / 1000) : -1);
+		self->onlineTill = base::unixtime::now() + (isOnline ? (Global::OnlineUpdatePeriod() / 1000) : -1);
 		Notify::peerUpdatedDelayed(
 			self,
 			Notify::PeerUpdate::Flag::UserOnlineChanged);
@@ -3675,35 +3664,35 @@ void MainWidget::checkIdleFinish() {
 	}
 }
 
-void MainWidget::updateReceived(const mtpPrime *from, const mtpPrime *end) {
-	if (end <= from) return;
+bool MainWidget::updateReceived(const mtpPrime *from, const mtpPrime *end) {
+	if (end <= from) {
+		return false;
+	}
 
 	session().checkAutoLock();
 
 	if (mtpTypeId(*from) == mtpc_new_session_created) {
-		try {
-			MTPNewSession newSession;
-			newSession.read(from, end);
-		} catch (mtpErrorUnexpected &) {
+		MTPNewSession newSession;
+		if (!newSession.read(from, end)) {
+			return false;
 		}
 		updSeq = 0;
 		MTP_LOG(0, ("getDifference { after new_session_created }%1").arg(cTestMode() ? " TESTMODE" : ""));
-		return getDifference();
-	} else {
-		try {
-			MTPUpdates updates;
-			updates.read(from, end);
-
-			_lastUpdateTime = crl::now();
-			_noUpdatesTimer.callOnce(kNoUpdatesTimeout);
-			if (!requestingDifference()
-				|| HasForceLogoutNotification(updates)) {
-				feedUpdates(updates);
-			}
-		} catch (mtpErrorUnexpected &) { // just some other type
-		}
+		getDifference();
+		return true;
 	}
-	update();
+	MTPUpdates updates;
+	if (!updates.read(from, end)) {
+		return false;
+	}
+
+	_lastUpdateTime = crl::now();
+	_noUpdatesTimer.callOnce(kNoUpdatesTimeout);
+	if (!requestingDifference()
+		|| HasForceLogoutNotification(updates)) {
+		feedUpdates(updates);
+	}
+	return true;
 }
 
 void MainWidget::feedUpdates(const MTPUpdates &updates, uint64 randomId) {
@@ -3820,11 +3809,11 @@ void MainWidget::feedUpdates(const MTPUpdates &updates, uint64 randomId) {
 						item->id,
 						ApiWrap::RequestMessageDataCallback());
 				}
-				item->setText({
+				item->updateSentContent({
 					sent.text,
 					TextUtilities::EntitiesFromMTP(list.value_or_empty())
-				});
-				item->updateSentMedia(d.vmedia());
+				}, d.vmedia());
+				item->contributeToSlowmode(d.vdate().v);
 				if (!wasAlready) {
 					item->indexAsNewItem();
 				}
@@ -3902,19 +3891,25 @@ void MainWidget::feedUpdate(const MTPUpdate &update) {
 		const auto &d = update.c_updateMessageID();
 		const auto randomId = d.vrandom_id().v;
 		if (const auto id = session().data().messageIdByRandomId(randomId)) {
-			const auto channel = id.channel;
 			const auto newId = d.vid().v;
 			if (const auto local = session().data().message(id)) {
-				const auto existing = session().data().message(channel, newId);
-				if (existing && !local->mainView()) {
-					const auto history = local->history();
-					local->destroy();
-					history->requestChatListMessage();
+				if (local->isScheduled()) {
+					session().data().scheduledMessages().apply(d, local);
 				} else {
-					if (existing) {
-						existing->destroy();
+					const auto channel = id.channel;
+					const auto existing = session().data().message(
+						channel,
+						newId);
+					if (existing && !local->mainView()) {
+						const auto history = local->history();
+						local->destroy();
+						history->requestChatListMessage();
+					} else {
+						if (existing) {
+							existing->destroy();
+						}
+						local->setRealId(d.vid().v);
 					}
-					local->setRealId(d.vid().v);
 				}
 			}
 			session().data().unregisterMessageRandomId(randomId);
@@ -4008,7 +4003,7 @@ void MainWidget::feedUpdate(const MTPUpdate &update) {
 			history->outboxRead(d.vmax_id().v);
 			if (!requestingDifference()) {
 				if (const auto user = history->peer->asUser()) {
-					user->madeAction(unixtime());
+					user->madeAction(base::unixtime::now());
 				}
 			}
 			if (_history->peer() && _history->peer()->id == peer) {
@@ -4076,6 +4071,16 @@ void MainWidget::feedUpdate(const MTPUpdate &update) {
 		}
 	} break;
 
+	case mtpc_updateNewScheduledMessage: {
+		const auto &d = update.c_updateNewScheduledMessage();
+		session().data().scheduledMessages().apply(d);
+	} break;
+
+	case mtpc_updateDeleteScheduledMessages: {
+		const auto &d = update.c_updateDeleteScheduledMessages();
+		session().data().scheduledMessages().apply(d);
+	} break;
+
 	case mtpc_updateWebPage: {
 		auto &d = update.c_updateWebPage();
 
@@ -4117,7 +4122,7 @@ void MainWidget::feedUpdate(const MTPUpdate &update) {
 		const auto history = session().data().historyLoaded(userId);
 		const auto user = session().data().userLoaded(d.vuser_id().v);
 		if (history && user) {
-			const auto when = requestingDifference() ? 0 : unixtime();
+			const auto when = requestingDifference() ? 0 : base::unixtime::now();
 			session().data().registerSendAction(history, user, d.vaction(), when);
 		}
 	} break;
@@ -4136,7 +4141,7 @@ void MainWidget::feedUpdate(const MTPUpdate &update) {
 			? nullptr
 			: session().data().userLoaded(d.vuser_id().v);
 		if (history && user) {
-			const auto when = requestingDifference() ? 0 : unixtime();
+			const auto when = requestingDifference() ? 0 : base::unixtime::now();
 			session().data().registerSendAction(history, user, d.vaction(), when);
 		}
 	} break;
@@ -4251,7 +4256,7 @@ void MainWidget::feedUpdate(const MTPUpdate &update) {
 	} break;
 
 	case mtpc_updateConfig: {
-		Core::App().mtp()->requestConfig();
+		session().mtp()->requestConfig();
 	} break;
 
 	case mtpc_updateUserPhone: {
@@ -4295,7 +4300,7 @@ void MainWidget::feedUpdate(const MTPUpdate &update) {
 	} break;
 
 	case mtpc_updatePhoneCall: {
-		Calls::Current().handleUpdate(update.c_updatePhoneCall());
+		session().calls().handleUpdate(update.c_updatePhoneCall());
 	} break;
 
 	case mtpc_updateUserBlocked: {
@@ -4443,6 +4448,11 @@ void MainWidget::feedUpdate(const MTPUpdate &update) {
 		if (const auto channel = session().data().channelLoaded(d.vchannel_id().v)) {
 			channel->inviter = UserId(0);
 			if (channel->amIn()) {
+				if (channel->isMegagroup()
+					&& !channel->amCreator()
+					&& !channel->hasAdminRights()) {
+					channel->updateFullForced();
+				}
 				const auto history = channel->owner().history(channel);
 				//if (const auto feed = channel->feed()) { // #feed
 				//	feed->requestChatListMessage();

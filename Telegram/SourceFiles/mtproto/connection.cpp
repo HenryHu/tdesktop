@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "base/openssl_help.h"
 #include "base/qthelp_url.h"
+#include "base/unixtime.h"
 
 extern "C" {
 #include <openssl/bn.h>
@@ -85,12 +86,16 @@ bool IsGoodModExpFirst(
 bool IsPrimeAndGoodCheck(const openssl::BigNum &prime, int g) {
 	constexpr auto kGoodPrimeBitsCount = 2048;
 
-	if (prime.failed() || prime.isNegative() || prime.bitsSize() != kGoodPrimeBitsCount) {
-		LOG(("MTP Error: Bad prime bits count %1, expected %2.").arg(prime.bitsSize()).arg(kGoodPrimeBitsCount));
+	if (prime.failed()
+		|| prime.isNegative()
+		|| prime.bitsSize() != kGoodPrimeBitsCount) {
+		LOG(("MTP Error: Bad prime bits count %1, expected %2."
+			).arg(prime.bitsSize()
+			).arg(kGoodPrimeBitsCount));
 		return false;
 	}
 
-	openssl::Context context;
+	const auto context = openssl::Context();
 	if (!prime.isPrime(context)) {
 		LOG(("MTP Error: Bad prime."));
 		return false;
@@ -98,14 +103,14 @@ bool IsPrimeAndGoodCheck(const openssl::BigNum &prime, int g) {
 
 	switch (g) {
 	case 2: {
-		auto mod8 = prime.modWord(8);
+		const auto mod8 = prime.countModWord(8);
 		if (mod8 != 7) {
 			LOG(("BigNum PT Error: bad g value: %1, mod8: %2").arg(g).arg(mod8));
 			return false;
 		}
 	} break;
 	case 3: {
-		auto mod3 = prime.modWord(3);
+		const auto mod3 = prime.countModWord(3);
 		if (mod3 != 2) {
 			LOG(("BigNum PT Error: bad g value: %1, mod3: %2").arg(g).arg(mod3));
 			return false;
@@ -113,21 +118,21 @@ bool IsPrimeAndGoodCheck(const openssl::BigNum &prime, int g) {
 	} break;
 	case 4: break;
 	case 5: {
-		auto mod5 = prime.modWord(5);
+		const auto mod5 = prime.countModWord(5);
 		if (mod5 != 1 && mod5 != 4) {
 			LOG(("BigNum PT Error: bad g value: %1, mod5: %2").arg(g).arg(mod5));
 			return false;
 		}
 	} break;
 	case 6: {
-		auto mod24 = prime.modWord(24);
+		const auto mod24 = prime.countModWord(24);
 		if (mod24 != 19 && mod24 != 23) {
 			LOG(("BigNum PT Error: bad g value: %1, mod24: %2").arg(g).arg(mod24));
 			return false;
 		}
 	} break;
 	case 7: {
-		auto mod7 = prime.modWord(7);
+		const auto mod7 = prime.countModWord(7);
 		if (mod7 != 3 && mod7 != 5 && mod7 != 6) {
 			LOG(("BigNum PT Error: bad g value: %1, mod7: %2").arg(g).arg(mod7));
 			return false;
@@ -139,10 +144,7 @@ bool IsPrimeAndGoodCheck(const openssl::BigNum &prime, int g) {
 	} break;
 	}
 
-	auto primeSubOneDivTwo = prime;
-	primeSubOneDivTwo.setSubWord(1);
-	primeSubOneDivTwo.setDivWord(2);
-	if (!primeSubOneDivTwo.isPrime(context)) {
+	if (!openssl::BigNum(prime).subWord(1).divWord(2).isPrime(context)) {
 		LOG(("MTP Error: Bad (prime - 1) / 2."));
 		return false;
 	}
@@ -183,8 +185,9 @@ bytes::vector CreateAuthKey(
 		bytes::const_span randomBytes,
 		bytes::const_span primeBytes) {
 	using openssl::BigNum;
-	BigNum first(firstBytes);
-	BigNum prime(primeBytes);
+
+	const auto first = BigNum(firstBytes);
+	const auto prime = BigNum(primeBytes);
 	if (!IsGoodModExpFirst(first, prime)) {
 		LOG(("AuthKey Error: Bad first prime in CreateAuthKey()."));
 		return {};
@@ -356,10 +359,11 @@ void ConnectionPrivate::appendTestConnection(
 			_instance,
 			protocol,
 			thread(),
+			protocolSecret,
 			_connectionOptions->proxy),
 		priority
 	});
-	auto weak = _testConnections.back().data.get();
+	const auto weak = _testConnections.back().data.get();
 	connect(weak, &AbstractConnection::error, [=](int errorCode) {
 		onError(weak, errorCode);
 	});
@@ -377,6 +381,11 @@ void ConnectionPrivate::appendTestConnection(
 	});
 	connect(weak, &AbstractConnection::disconnected, [=] {
 		onDisconnected(weak);
+	});
+	connect(weak, &AbstractConnection::syncTimeRequest, [=] {
+		InvokeQueued(_instance, [instance = _instance] {
+			instance->syncHttpUnixtime();
+		});
 	});
 
 	InvokeQueued(_testConnections.back().data, [=] {
@@ -522,7 +531,7 @@ void ConnectionPrivate::resetSession() { // recreate all msg_id and msg_seqno
 	auto &toSend = sessionData->toSendMap();
 	auto &wereAcked = sessionData->wereAckedMap();
 
-	auto newId = msgid();
+	auto newId = base::unixtime::mtproto_msg_id();
 	auto setSeqNumbers = RequestMap();
 	auto replaces = QMap<mtpMsgId, mtpMsgId>();
 	for (auto i = haveSent.cbegin(), e = haveSent.cend(); i != e; ++i) {
@@ -532,16 +541,20 @@ void ConnectionPrivate::resetSession() { // recreate all msg_id and msg_seqno
 			mtpMsgId id = i.key();
 			if (id > newId) {
 				while (true) {
-					if (toResend.constFind(newId) == toResend.cend() && wereAcked.constFind(newId) == wereAcked.cend() && haveSent.constFind(newId) == haveSent.cend()) {
+					if (toResend.constFind(newId) == toResend.cend()
+						&& wereAcked.constFind(newId) == wereAcked.cend()
+						&& haveSent.constFind(newId) == haveSent.cend()) {
 						break;
 					}
-					mtpMsgId m = msgid();
+					const auto m = base::unixtime::mtproto_msg_id();
 					if (m <= newId) break; // wtf
 
 					newId = m;
 				}
 
-				MTP_LOG(_shiftedDcId, ("Replacing msgId %1 to %2!").arg(id).arg(newId));
+				MTP_LOG(_shiftedDcId, ("Replacing msgId %1 to %2!"
+					).arg(id
+					).arg(newId));
 				replaces.insert(id, newId);
 				id = newId;
 				*(mtpMsgId*)(i.value()->data() + 4) = id;
@@ -549,7 +562,8 @@ void ConnectionPrivate::resetSession() { // recreate all msg_id and msg_seqno
 			setSeqNumbers.insert(id, i.value());
 		}
 	}
-	for (auto i = toResend.cbegin(), e = toResend.cend(); i != e; ++i) { // collect all non-container requests
+	// Collect all non-container requests.
+	for (auto i = toResend.cbegin(), e = toResend.cend(); i != e; ++i) {
 		const auto j = toSend.constFind(i.value());
 		if (j == toSend.cend()) continue;
 
@@ -559,16 +573,20 @@ void ConnectionPrivate::resetSession() { // recreate all msg_id and msg_seqno
 			mtpMsgId id = i.key();
 			if (id > newId) {
 				while (true) {
-					if (toResend.constFind(newId) == toResend.cend() && wereAcked.constFind(newId) == wereAcked.cend() && haveSent.constFind(newId) == haveSent.cend()) {
+					if (toResend.constFind(newId) == toResend.cend()
+						&& wereAcked.constFind(newId) == wereAcked.cend()
+						&& haveSent.constFind(newId) == haveSent.cend()) {
 						break;
 					}
-					mtpMsgId m = msgid();
+					const auto m = base::unixtime::mtproto_msg_id();
 					if (m <= newId) break; // wtf
 
 					newId = m;
 				}
 
-				MTP_LOG(_shiftedDcId, ("Replacing msgId %1 to %2!").arg(id).arg(newId));
+				MTP_LOG(_shiftedDcId, ("Replacing msgId %1 to %2!"
+					).arg(id
+					).arg(newId));
 				replaces.insert(id, newId);
 				id = newId;
 				*(mtpMsgId*)(j.value()->data() + 4) = id;
@@ -601,6 +619,10 @@ void ConnectionPrivate::resetSession() { // recreate all msg_id and msg_seqno
 			}
 			const auto l = wereAcked.find(i.key());
 			if (l != wereAcked.cend()) {
+				DEBUG_LOG(("MTP Info: Replaced %1 with %2 in wereAcked."
+					).arg(i.key()
+					).arg(i.value()));
+
 				const auto req = l.value();
 				wereAcked.erase(l);
 				wereAcked.insert(i.value(), req);
@@ -663,7 +685,7 @@ mtpMsgId ConnectionPrivate::replaceMsgId(SecureRequest &request, mtpMsgId newId)
 				if (toResend.constFind(newId) == toResend.cend() && wereAcked.constFind(newId) == wereAcked.cend() && haveSent.constFind(newId) == haveSent.cend()) {
 					break;
 				}
-				const auto m = msgid();
+				const auto m = base::unixtime::mtproto_msg_id();
 				if (m <= newId) break; // wtf
 
 				newId = m;
@@ -710,9 +732,13 @@ mtpMsgId ConnectionPrivate::replaceMsgId(SecureRequest &request, mtpMsgId newId)
 }
 
 mtpMsgId ConnectionPrivate::placeToContainer(SecureRequest &toSendRequest, mtpMsgId &bigMsgId, mtpMsgId *&haveSentArr, SecureRequest &req) {
-	mtpMsgId msgId = prepareToSend(req, bigMsgId);
-	if (msgId > bigMsgId) msgId = replaceMsgId(req, bigMsgId);
-	if (msgId >= bigMsgId) bigMsgId = msgid();
+	auto msgId = prepareToSend(req, bigMsgId);
+	if (msgId > bigMsgId) {
+		msgId = replaceMsgId(req, bigMsgId);
+	}
+	if (msgId >= bigMsgId) {
+		bigMsgId = base::unixtime::mtproto_msg_id();
+	}
 	*(haveSentArr++) = msgId;
 
 	uint32 from = toSendRequest->size(), len = req.messageSize();
@@ -886,7 +912,9 @@ void ConnectionPrivate::tryToSend() {
 				locker1.unlock();
 			}
 
-			mtpMsgId msgId = prepareToSend(toSendRequest, msgid());
+			const auto msgId = prepareToSend(
+				toSendRequest,
+				base::unixtime::mtproto_msg_id());
 			if (pingRequest) {
 				_pingMsgId = msgId;
 				needAnyResponse = true;
@@ -961,7 +989,8 @@ void ConnectionPrivate::tryToSend() {
 			toSendRequest->push_back(mtpc_msg_container);
 			toSendRequest->push_back(toSendCount);
 
-			mtpMsgId bigMsgId = msgid(); // check for a valid container
+			// check for a valid container
+			auto bigMsgId = base::unixtime::mtproto_msg_id();
 
 			// the fact of this lock is used in replaceMsgId()
 			QWriteLocker locker2(sessionData->haveSentMutex());
@@ -986,8 +1015,12 @@ void ConnectionPrivate::tryToSend() {
 			for (auto i = toSend.begin(), e = toSend.end(); i != e; ++i) {
 				auto &req = i.value();
 				auto msgId = prepareToSend(req, bigMsgId);
-				if (msgId > bigMsgId) msgId = replaceMsgId(req, bigMsgId);
-				if (msgId >= bigMsgId) bigMsgId = msgid();
+				if (msgId > bigMsgId) {
+					msgId = replaceMsgId(req, bigMsgId);
+				}
+				if (msgId >= bigMsgId) {
+					bigMsgId = base::unixtime::mtproto_msg_id();
+				}
 				*(haveSentArr++) = msgId;
 				bool added = false;
 				if (req->requestId) {
@@ -1331,7 +1364,7 @@ void ConnectionPrivate::waitConnectedFailed() {
 		_waitForConnected = std::min(maxTimeout, 2 * _waitForConnected);
 	}
 
-	doDisconnect();
+	connectingTimedOut();
 	restarted = true;
 
 	DEBUG_LOG(("MTP Info: immediate restart!"));
@@ -1340,6 +1373,13 @@ void ConnectionPrivate::waitConnectedFailed() {
 
 void ConnectionPrivate::waitBetterFailed() {
 	confirmBestConnection();
+}
+
+void ConnectionPrivate::connectingTimedOut() {
+	for (const auto &connection : _testConnections) {
+		connection.data->timedOut();
+	}
+	doDisconnect();
 }
 
 void ConnectionPrivate::doDisconnect() {
@@ -1512,8 +1552,9 @@ void ConnectionPrivate::handleReceived() {
 			return restartOnError();
 		}
 
-		int32 serverTime((int32)(msgId >> 32)), clientTime(unixtime());
-		bool isReply = ((msgId & 0x03) == 1);
+		const auto serverTime = int32(msgId >> 32);
+		const auto clientTime = base::unixtime::now();
+		const auto isReply = ((msgId & 0x03) == 1);
 		if (!isReply && ((msgId & 0x03) != 3)) {
 			LOG(("MTP Error: bad msg_id %1 in message received").arg(msgId));
 
@@ -1611,8 +1652,7 @@ void ConnectionPrivate::handleReceived() {
 }
 
 ConnectionPrivate::HandleResult ConnectionPrivate::handleOneReceived(const mtpPrime *from, const mtpPrime *end, uint64 msgId, int32 serverTime, uint64 serverSalt, bool badTime) {
-	mtpTypeId cons = *from;
-	try {
+	const auto cons = mtpTypeId(*from);
 
 	switch (cons) {
 
@@ -1626,17 +1666,23 @@ ConnectionPrivate::HandleResult ConnectionPrivate::handleOneReceived(const mtpPr
 	}
 
 	case mtpc_msg_container: {
-		if (++from >= end) throw mtpErrorInsufficient();
+		if (++from >= end) {
+			return HandleResult::ParseError;
+		}
 
 		const mtpPrime *otherEnd;
-		uint32 msgsCount = (uint32)*(from++);
+		const auto msgsCount = (uint32)*(from++);
 		DEBUG_LOG(("Message Info: container received, count: %1").arg(msgsCount));
 		for (uint32 i = 0; i < msgsCount; ++i) {
-			if (from + 4 >= end) throw mtpErrorInsufficient();
+			if (from + 4 >= end) {
+				return HandleResult::ParseError;
+			}
 			otherEnd = from + 4;
 
 			MTPlong inMsgId;
-			inMsgId.read(from, otherEnd);
+			if (!inMsgId.read(from, otherEnd)) {
+				return HandleResult::ParseError;
+			}
 			bool isReply = ((inMsgId.v & 0x03) == 1);
 			if (!isReply && ((inMsgId.v & 0x03) != 3)) {
 				LOG(("Message Error: bad msg_id %1 in contained message received").arg(inMsgId.v));
@@ -1644,9 +1690,13 @@ ConnectionPrivate::HandleResult ConnectionPrivate::handleOneReceived(const mtpPr
 			}
 
 			MTPint inSeqNo;
-			inSeqNo.read(from, otherEnd);
+			if (!inSeqNo.read(from, otherEnd)) {
+				return HandleResult::ParseError;
+			}
 			MTPint bytes;
-			bytes.read(from, otherEnd);
+			if (!bytes.read(from, otherEnd)) {
+				return HandleResult::ParseError;
+			}
 			if ((bytes.v & 0x03) || bytes.v < 4) {
 				LOG(("Message Error: bad length %1 of contained message received").arg(bytes.v));
 				return HandleResult::RestartConnection;
@@ -1658,7 +1708,9 @@ ConnectionPrivate::HandleResult ConnectionPrivate::handleOneReceived(const mtpPr
 			DEBUG_LOG(("Message Info: message from container, msg_id: %1, needAck: %2").arg(inMsgId.v).arg(Logs::b(needAck)));
 
 			otherEnd = from + (bytes.v >> 2);
-			if (otherEnd > end) throw mtpErrorInsufficient();
+			if (otherEnd > end) {
+				return HandleResult::ParseError;
+			}
 
 			bool needToHandle = false;
 			{
@@ -1680,7 +1732,9 @@ ConnectionPrivate::HandleResult ConnectionPrivate::handleOneReceived(const mtpPr
 
 	case mtpc_msgs_ack: {
 		MTPMsgsAck msg;
-		msg.read(from, end);
+		if (!msg.read(from, end)) {
+			return HandleResult::ParseError;
+		}
 		auto &ids = msg.c_msgs_ack().vmsg_ids().v;
 		uint32 idsCount = ids.size();
 
@@ -1699,7 +1753,9 @@ ConnectionPrivate::HandleResult ConnectionPrivate::handleOneReceived(const mtpPr
 
 	case mtpc_bad_msg_notification: {
 		MTPBadMsgNotification msg;
-		msg.read(from, end);
+		if (!msg.read(from, end)) {
+			return HandleResult::ParseError;
+		}
 		const auto &data(msg.c_bad_msg_notification());
 		LOG(("Message Info: bad message notification received (error_code %3) for msg_id = %1, seq_no = %2").arg(data.vbad_msg_id().v).arg(data.vbad_msg_seqno().v).arg(data.verror_code().v));
 
@@ -1757,7 +1813,7 @@ ConnectionPrivate::HandleResult ConnectionPrivate::handleOneReceived(const mtpPr
 
 			if (needResend) { // bad msg_id or bad container
 				if (serverSalt) sessionData->setSalt(serverSalt);
-				unixtimeSet(serverTime, true);
+				base::unixtime::update(serverTime, true);
 
 				DEBUG_LOG(("Message Info: unixtime updated, now %1, resending in container...").arg(serverTime));
 
@@ -1765,7 +1821,7 @@ ConnectionPrivate::HandleResult ConnectionPrivate::handleOneReceived(const mtpPr
 			} else { // must create new session, because msg_id and msg_seqno are inconsistent
 				if (badTime) {
 					if (serverSalt) sessionData->setSalt(serverSalt);
-					unixtimeSet(serverTime, true);
+					base::unixtime::update(serverTime, true);
 					badTime = false;
 				}
 				LOG(("Message Info: bad message notification received, msgId %1, error_code %2").arg(data.vbad_msg_id().v).arg(errorCode));
@@ -1796,7 +1852,9 @@ ConnectionPrivate::HandleResult ConnectionPrivate::handleOneReceived(const mtpPr
 
 	case mtpc_bad_server_salt: {
 		MTPBadMsgNotification msg;
-		msg.read(from, end);
+		if (!msg.read(from, end)) {
+			return HandleResult::ParseError;
+		}
 		const auto &data(msg.c_bad_server_salt());
 		DEBUG_LOG(("Message Info: bad server salt received (error_code %4) for msg_id = %1, seq_no = %2, new salt: %3").arg(data.vbad_msg_id().v).arg(data.vbad_msg_seqno().v).arg(data.vnew_server_salt().v).arg(data.verror_code().v));
 
@@ -1810,7 +1868,7 @@ ConnectionPrivate::HandleResult ConnectionPrivate::handleOneReceived(const mtpPr
 
 		uint64 serverSalt = data.vnew_server_salt().v;
 		sessionData->setSalt(serverSalt);
-		unixtimeSet(serverTime);
+		base::unixtime::update(serverTime);
 
 		if (setState(ConnectedState, ConnectingState)) { // maybe only connected
 			if (restarted) {
@@ -1831,7 +1889,9 @@ ConnectionPrivate::HandleResult ConnectionPrivate::handleOneReceived(const mtpPr
 			return HandleResult::Ignored;
 		}
 		MTPMsgsStateReq msg;
-		msg.read(from, end);
+		if (!msg.read(from, end)) {
+			return HandleResult::ParseError;
+		}
 		auto &ids = msg.c_msgs_state_req().vmsg_ids().v;
 		auto idsCount = ids.size();
 		DEBUG_LOG(("Message Info: msgs_state_req received, ids: %1").arg(LogIdsVector(ids)));
@@ -1879,7 +1939,9 @@ ConnectionPrivate::HandleResult ConnectionPrivate::handleOneReceived(const mtpPr
 
 	case mtpc_msgs_state_info: {
 		MTPMsgsStateInfo msg;
-		msg.read(from, end);
+		if (!msg.read(from, end)) {
+			return HandleResult::ParseError;
+		}
 		auto &data = msg.c_msgs_state_info();
 
 		auto reqMsgId = data.vreq_msg_id().v;
@@ -1897,7 +1959,7 @@ ConnectionPrivate::HandleResult ConnectionPrivate::handleOneReceived(const mtpPr
 			}
 			if (badTime) {
 				if (serverSalt) sessionData->setSalt(serverSalt); // requestsFixTimeSalt with no lookup
-				unixtimeSet(serverTime, true);
+				base::unixtime::update(serverTime, true);
 
 				DEBUG_LOG(("Message Info: unixtime updated from mtpc_msgs_state_info, now %1").arg(serverTime));
 
@@ -1912,20 +1974,21 @@ ConnectionPrivate::HandleResult ConnectionPrivate::handleOneReceived(const mtpPr
 			LOG(("Message Error: bad request %1 found in requestMap, size: %2").arg(reqMsgId).arg(requestBuffer->size()));
 			return HandleResult::RestartConnection;
 		}
-		try {
-			const mtpPrime *rFrom = requestBuffer->constData() + 8, *rEnd = requestBuffer->constData() + requestBuffer->size();
-			if (mtpTypeId(*rFrom) == mtpc_msgs_state_req) {
-				MTPMsgsStateReq request;
-				request.read(rFrom, rEnd);
-				handleMsgsStates(request.c_msgs_state_req().vmsg_ids().v, states, toAck);
-			} else {
-				MTPMsgResendReq request;
-				request.read(rFrom, rEnd);
-				handleMsgsStates(request.c_msg_resend_req().vmsg_ids().v, states, toAck);
+		const mtpPrime *rFrom = requestBuffer->constData() + 8, *rEnd = requestBuffer->constData() + requestBuffer->size();
+		if (mtpTypeId(*rFrom) == mtpc_msgs_state_req) {
+			MTPMsgsStateReq request;
+			if (!request.read(rFrom, rEnd)) {
+				LOG(("Message Error: could not parse sent msgs_state_req"));
+				return HandleResult::ParseError;
 			}
-		} catch(Exception &) {
-			LOG(("Message Error: could not parse sent msgs_state_req"));
-			throw;
+			handleMsgsStates(request.c_msgs_state_req().vmsg_ids().v, states, toAck);
+		} else {
+			MTPMsgResendReq request;
+			if (!request.read(rFrom, rEnd)) {
+				LOG(("Message Error: could not parse sent msgs_state_req"));
+				return HandleResult::ParseError;
+			}
+			handleMsgsStates(request.c_msg_resend_req().vmsg_ids().v, states, toAck);
 		}
 
 		requestsAcked(toAck);
@@ -1938,7 +2001,9 @@ ConnectionPrivate::HandleResult ConnectionPrivate::handleOneReceived(const mtpPr
 		}
 
 		MTPMsgsAllInfo msg;
-		msg.read(from, end);
+		if (!msg.read(from, end)) {
+			return HandleResult::ParseError;
+		}
 		auto &data = msg.c_msgs_all_info();
 		auto &ids = data.vmsg_ids().v;
 		auto &states = data.vinfo().v;
@@ -1953,7 +2018,9 @@ ConnectionPrivate::HandleResult ConnectionPrivate::handleOneReceived(const mtpPr
 
 	case mtpc_msg_detailed_info: {
 		MTPMsgDetailedInfo msg;
-		msg.read(from, end);
+		if (!msg.read(from, end)) {
+			return HandleResult::ParseError;
+		}
 		const auto &data(msg.c_msg_detailed_info());
 
 		DEBUG_LOG(("Message Info: msg detailed info, sent msgId %1, answerId %2, status %3, bytes %4").arg(data.vmsg_id().v).arg(data.vanswer_msg_id().v).arg(data.vstatus().v).arg(data.vbytes().v));
@@ -1989,7 +2056,9 @@ ConnectionPrivate::HandleResult ConnectionPrivate::handleOneReceived(const mtpPr
 			return HandleResult::Ignored;
 		}
 		MTPMsgDetailedInfo msg;
-		msg.read(from, end);
+		if (!msg.read(from, end)) {
+			return HandleResult::ParseError;
+		}
 		const auto &data(msg.c_msg_new_detailed_info());
 
 		DEBUG_LOG(("Message Info: msg new detailed info, answerId %2, status %3, bytes %4").arg(data.vanswer_msg_id().v).arg(data.vstatus().v).arg(data.vbytes().v));
@@ -2010,7 +2079,9 @@ ConnectionPrivate::HandleResult ConnectionPrivate::handleOneReceived(const mtpPr
 
 	case mtpc_msg_resend_req: {
 		MTPMsgResendReq msg;
-		msg.read(from, end);
+		if (!msg.read(from, end)) {
+			return HandleResult::ParseError;
+		}
 		auto &ids = msg.c_msg_resend_req().vmsg_ids().v;
 
 		auto idsCount = ids.size();
@@ -2025,11 +2096,15 @@ ConnectionPrivate::HandleResult ConnectionPrivate::handleOneReceived(const mtpPr
 	} return HandleResult::Success;
 
 	case mtpc_rpc_result: {
-		if (from + 3 > end) throw mtpErrorInsufficient();
+		if (from + 3 > end) {
+			return HandleResult::ParseError;
+		}
 		auto response = SerializedMessage();
 
 		MTPlong reqMsgId;
-		reqMsgId.read(++from, end);
+		if (!reqMsgId.read(++from, end)) {
+			return HandleResult::ParseError;
+		}
 		mtpTypeId typeId = from[0];
 
 		DEBUG_LOG(("RPC Info: response received for %1, queueing...").arg(reqMsgId.v));
@@ -2048,7 +2123,7 @@ ConnectionPrivate::HandleResult ConnectionPrivate::handleOneReceived(const mtpPr
 		if (typeId == mtpc_gzip_packed) {
 			DEBUG_LOG(("RPC Info: gzip container"));
 			response = ungzip(++from, end);
-			if (!response.size()) {
+			if (response.empty()) {
 				return HandleResult::RestartConnection;
 			}
 			typeId = response[0];
@@ -2079,7 +2154,9 @@ ConnectionPrivate::HandleResult ConnectionPrivate::handleOneReceived(const mtpPr
 	case mtpc_new_session_created: {
 		const mtpPrime *start = from;
 		MTPNewSession msg;
-		msg.read(from, end);
+		if (!msg.read(from, end)) {
+			return HandleResult::ParseError;
+		}
 		const auto &data(msg.c_new_session_created());
 
 		if (badTime) {
@@ -2117,7 +2194,9 @@ ConnectionPrivate::HandleResult ConnectionPrivate::handleOneReceived(const mtpPr
 
 	case mtpc_pong: {
 		MTPPong msg;
-		msg.read(from, end);
+		if (!msg.read(from, end)) {
+			return HandleResult::ParseError;
+		}
 		const auto &data(msg.c_pong());
 		DEBUG_LOG(("Message Info: pong received, msg_id: %1, ping_id: %2").arg(data.vmsg_id().v).arg(data.vping_id().v));
 
@@ -2142,10 +2221,6 @@ ConnectionPrivate::HandleResult ConnectionPrivate::handleOneReceived(const mtpPr
 		requestsAcked(ids, true);
 	} return HandleResult::Success;
 
-	}
-
-	} catch (Exception &) {
-		return HandleResult::RestartConnection;
 	}
 
 	if (badTime) {
@@ -2179,12 +2254,16 @@ ConnectionPrivate::HandleResult ConnectionPrivate::handleOneReceived(const mtpPr
 }
 
 mtpBuffer ConnectionPrivate::ungzip(const mtpPrime *from, const mtpPrime *end) const {
-	MTPstring packed;
-	packed.read(from, end); // read packed string as serialized mtp string type
-	uint32 packedLen = packed.v.size(), unpackedChunk = packedLen, unpackedLen = 0;
-
 	mtpBuffer result; // * 4 because of mtpPrime type
 	result.resize(0);
+
+	MTPstring packed;
+	if (!packed.read(from, end)) { // read packed string as serialized mtp string type
+		LOG(("RPC Error: could not read gziped bytes."));
+		return result;
+	}
+	uint32 packedLen = packed.v.size(), unpackedChunk = packedLen, unpackedLen = 0;
+
 	z_stream stream;
 	stream.zalloc = 0;
 	stream.zfree = 0;
@@ -2232,7 +2311,7 @@ bool ConnectionPrivate::requestsFixTimeSalt(const QVector<MTPlong> &ids, int32 s
 	for (uint32 i = 0; i < idsCount; ++i) {
 		if (wasSent(ids[i].v)) {// found such msg_id in recent acked requests or in recent sent requests
 			if (serverSalt) sessionData->setSalt(serverSalt);
-			unixtimeSet(serverTime, true);
+			base::unixtime::update(serverTime, true);
 			return true;
 		}
 	}
@@ -2704,7 +2783,10 @@ void ConnectionPrivate::dhParamsAnswered() {
 
 		const mtpPrime *from(&decBuffer[5]), *to(from), *end(from + (encDHBufLen - 5));
 		MTPServer_DH_inner_data dh_inner;
-		dh_inner.read(to, end);
+		if (!dh_inner.read(to, end)) {
+			LOG(("AuthKey Error: could not decrypt server_DH_inner_data!"));
+			return restart();
+		}
 		const auto &dh_inner_data(dh_inner.c_server_DH_inner_data());
 		if (dh_inner_data.vnonce() != _authKeyData->nonce) {
 			LOG(("AuthKey Error: received nonce <> sent nonce (in server_DH_inner_data)!"));
@@ -2722,7 +2804,7 @@ void ConnectionPrivate::dhParamsAnswered() {
 			DEBUG_LOG(("AuthKey Error: sha1 did not match, server_nonce: %1, new_nonce %2, encrypted data %3").arg(Logs::mb(&_authKeyData->server_nonce, 16).str()).arg(Logs::mb(&_authKeyData->new_nonce, 16).str()).arg(Logs::mb(encDHStr.constData(), encDHLen).str()));
 			return restart();
 		}
-		unixtimeSet(dh_inner_data.vserver_time().v);
+		base::unixtime::update(dh_inner_data.vserver_time().v);
 
 		// check that dhPrime and (dhPrime - 1) / 2 are really prime
 		if (!IsPrimeAndGood(bytes::make_span(dh_inner_data.vdh_prime().v), dh_inner_data.vg().v)) {
@@ -3042,7 +3124,9 @@ void ConnectionPrivate::onReadyData() {
 
 template <typename Request>
 void ConnectionPrivate::sendNotSecureRequest(const Request &request) {
-	auto packet = _connection->prepareNotSecurePacket(request);
+	auto packet = _connection->prepareNotSecurePacket(
+		request,
+		base::unixtime::mtproto_msg_id());
 
 	DEBUG_LOG(("AuthKey Info: sending request, size: %1, time: %3"
 		).arg(packet.size() - 8
@@ -3072,13 +3156,8 @@ bool ConnectionPrivate::readNotSecureResponse(Response &response) {
 	if (answer.empty()) {
 		return false;
 	}
-	try {
-		auto from = answer.data();
-		response.read(from, from + answer.size());
-	} catch (Exception &) {
-		return false;
-	}
-	return true;
+	auto from = answer.data();
+	return response.read(from, from + answer.size());
 }
 
 bool ConnectionPrivate::sendSecureRequest(
@@ -3240,15 +3319,23 @@ bool IsPrimeAndGood(bytes::const_span primeBytes, int g) {
 	return internal::IsPrimeAndGood(primeBytes, g);
 }
 
-bool IsGoodModExpFirst(const openssl::BigNum &modexp, const openssl::BigNum &prime) {
+bool IsGoodModExpFirst(
+		const openssl::BigNum &modexp,
+		const openssl::BigNum &prime) {
 	return internal::IsGoodModExpFirst(modexp, prime);
 }
 
-ModExpFirst CreateModExp(int g, bytes::const_span primeBytes, bytes::const_span randomSeed) {
+ModExpFirst CreateModExp(
+		int g,
+		bytes::const_span primeBytes,
+		bytes::const_span randomSeed) {
 	return internal::CreateModExp(g, primeBytes, randomSeed);
 }
 
-bytes::vector CreateAuthKey(bytes::const_span firstBytes, bytes::const_span randomBytes, bytes::const_span primeBytes) {
+bytes::vector CreateAuthKey(
+		bytes::const_span firstBytes,
+		bytes::const_span randomBytes,
+		bytes::const_span primeBytes) {
 	return internal::CreateAuthKey(firstBytes, randomBytes, primeBytes);
 }
 

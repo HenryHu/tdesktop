@@ -9,12 +9,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "data/data_wall_paper.h"
 
-class AuthSession;
+namespace Main {
+class Session;
+} // namespace Main
 
 namespace Window {
 namespace Theme {
 
-constexpr auto kMinimumTiledSize = 512;
+constexpr auto kThemeSchemeSizeLimit = 1024 * 1024;
 
 struct Cached {
 	QByteArray colors;
@@ -60,7 +62,10 @@ void ToggleNightMode(const QString &themePath);
 [[nodiscard]] bool IsNonDefaultBackground();
 void Revert();
 
-bool LoadFromFile(const QString &file, Instance *out, QByteArray *outContent);
+bool LoadFromFile(
+	const QString &file,
+	Instance *out,
+	QByteArray *outContent);
 bool IsPaletteTestingPath(const QString &path);
 QColor CountAverageColor(const QImage &image);
 QColor AdjustedColor(QColor original, QColor background);
@@ -164,7 +169,7 @@ private:
 	friend void KeepApplied();
 	friend bool IsNonDefaultBackground();
 
-	AuthSession *_session = nullptr;
+	Main::Session *_session = nullptr;
 	Data::WallPaper _paper = Data::details::UninitializedWallPaper();
 	std::optional<QColor> _paperColor;
 	QImage _original;
@@ -198,7 +203,10 @@ ChatBackground *Background();
 
 void ComputeBackgroundRects(QRect wholeFill, QSize imageSize, QRect &to, QRect &from);
 
-bool CopyColorsToPalette(const QString &path, const QByteArray &themeContent);
+bool CopyColorsToPalette(
+	const QString &destination,
+	const QString &themePath,
+	const QByteArray &themeContent);
 
 bool ReadPaletteValues(const QByteArray &content, Fn<bool(QLatin1String name, QLatin1String value)> callback);
 

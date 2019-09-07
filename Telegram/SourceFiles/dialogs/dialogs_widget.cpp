@@ -21,7 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "mainwindow.h"
 #include "mainwidget.h"
-#include "auth_session.h"
+#include "main/main_session.h"
 #include "apiwrap.h"
 #include "core/application.h"
 #include "core/event_filter.h"
@@ -166,7 +166,8 @@ Widget::Widget(
 , _cancelSearch(_searchControls, st::dialogsCancelSearch)
 , _lockUnlock(_searchControls, st::dialogsLock)
 , _scroll(this, st::dialogsScroll)
-, _scrollToTop(_scroll, st::dialogsToUp) {
+, _scrollToTop(_scroll, st::dialogsToUp)
+, _singleMessageSearch(&controller->session()) {
 	_inner = _scroll->setOwnedWidget(object_ptr<InnerWidget>(this, controller));
 
 	rpl::combine(
@@ -380,6 +381,7 @@ void Widget::fullSearchRefreshOn(rpl::producer<> events) {
 	}) | rpl::start_with_next([=] {
 		_searchTimer.stop();
 		_searchCache.clear();
+		_singleMessageSearch.clear();
 		_searchQueries.clear();
 		_searchQuery = QString();
 		_scroll->scrollToY(0);
@@ -442,7 +444,9 @@ void Widget::refreshFolderTopBar() {
 			_folderTopBar.create(this, controller());
 			updateControlsGeometry();
 		}
-		_folderTopBar->setActiveChat(_openedFolder);
+		_folderTopBar->setActiveChat(
+			_openedFolder,
+			HistoryView::TopBarWidget::Section::History);
 	} else {
 		_folderTopBar.destroy();
 	}
@@ -730,6 +734,12 @@ bool Widget::onSearchMessages(bool searchCache) {
 		return true;
 	}
 	if (searchCache) {
+		const auto success = _singleMessageSearch.lookup(q, [=] {
+			onNeedSearchMessages();
+		});
+		if (!success) {
+			return false;
+		}
 		const auto i = _searchCache.constFind(q);
 		if (i != _searchCache.cend()) {
 			_searchQuery = q;
@@ -804,17 +814,18 @@ bool Widget::onSearchMessages(bool searchCache) {
 		}
 		_searchQueries.insert(_searchRequest, _searchQuery);
 	}
-	if (searchForPeersRequired(q)) {
+	const auto query = Api::ConvertPeerSearchQuery(q);
+	if (searchForPeersRequired(query)) {
 		if (searchCache) {
-			auto i = _peerSearchCache.constFind(q);
+			auto i = _peerSearchCache.constFind(query);
 			if (i != _peerSearchCache.cend()) {
-				_peerSearchQuery = q;
+				_peerSearchQuery = query;
 				_peerSearchRequest = 0;
 				peerSearchReceived(i.value(), 0);
 				result = true;
 			}
-		} else if (_peerSearchQuery != q) {
-			_peerSearchQuery = q;
+		} else if (_peerSearchQuery != query) {
+			_peerSearchQuery = query;
 			_peerSearchFull = false;
 			_peerSearchRequest = MTP::send(
 				MTPcontacts_Search(
@@ -825,7 +836,7 @@ bool Widget::onSearchMessages(bool searchCache) {
 			_peerSearchQueries.insert(_peerSearchRequest, _peerSearchQuery);
 		}
 	} else {
-		_peerSearchQuery = q;
+		_peerSearchQuery = query;
 		_peerSearchFull = true;
 		peerSearchReceived(
 			MTP_contacts_found(
@@ -992,6 +1003,10 @@ void Widget::searchReceived(
 			}
 		}
 	}
+	const auto inject = (type == SearchRequestType::FromStart
+		|| type == SearchRequestType::PeerFromStart)
+		? *_singleMessageSearch.lookup(_searchQuery)
+		: nullptr;
 
 	if (_searchRequest == requestId) {
 		switch (result.type()) {
@@ -1003,7 +1018,7 @@ void Widget::searchReceived(
 				session().data().processChats(d.vchats());
 			}
 			auto &msgs = d.vmessages().v;
-			_inner->searchReceived(msgs, type, msgs.size());
+			_inner->searchReceived(msgs, inject, type, msgs.size());
 			if (type == SearchRequestType::MigratedFromStart || type == SearchRequestType::MigratedFromOffset) {
 				_searchFullMigrated = true;
 			} else {
@@ -1019,7 +1034,7 @@ void Widget::searchReceived(
 				session().data().processChats(d.vchats());
 			}
 			auto &msgs = d.vmessages().v;
-			const auto someAdded = _inner->searchReceived(msgs, type, d.vcount().v);
+			const auto someAdded = _inner->searchReceived(msgs, inject, type, d.vcount().v);
 			const auto nextRate = d.vnext_rate();
 			const auto rateUpdated = nextRate && (nextRate->v != _searchNextRate);
 			const auto finished = (type == SearchRequestType::FromStart || type == SearchRequestType::FromOffset)
@@ -1058,7 +1073,7 @@ void Widget::searchReceived(
 				session().data().processChats(d.vchats());
 			}
 			auto &msgs = d.vmessages().v;
-			if (!_inner->searchReceived(msgs, type, d.vcount().v)) {
+			if (!_inner->searchReceived(msgs, inject, type, d.vcount().v)) {
 				if (type == SearchRequestType::MigratedFromStart || type == SearchRequestType::MigratedFromOffset) {
 					_searchFullMigrated = true;
 				} else {
@@ -1292,6 +1307,7 @@ void Widget::setSearchInChat(Key chat, UserData *from) {
 
 void Widget::clearSearchCache() {
 	_searchCache.clear();
+	_singleMessageSearch.clear();
 	_searchQueries.clear();
 	_searchQuery = QString();
 	_searchQueryFrom = nullptr;

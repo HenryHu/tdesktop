@@ -12,10 +12,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/observer.h"
 #include "dialogs/dialogs_key.h"
 
-class AuthSession;
 class MainWidget;
+class MainWindow;
 class HistoryMessage;
 class HistoryService;
+
+namespace ChatHelpers {
+class TabbedSelector;
+} // namespace ChatHelpers
+
+namespace Main {
+class Session;
+} // namespace Main
 
 namespace Settings {
 enum class Type;
@@ -104,9 +112,9 @@ class SessionController;
 
 class SessionNavigation {
 public:
-	explicit SessionNavigation(not_null<AuthSession*> session);
+	explicit SessionNavigation(not_null<Main::Session*> session);
 
-	AuthSession &session() const;
+	Main::Session &session() const;
 
 	virtual void showSection(
 		SectionMemento &&memento,
@@ -133,7 +141,7 @@ public:
 	virtual ~SessionNavigation() = default;
 
 private:
-	const not_null<AuthSession*> _session;
+	const not_null<Main::Session*> _session;
 
 };
 
@@ -142,12 +150,17 @@ class SessionController
 	, private base::Subscriber {
 public:
 	SessionController(
-		not_null<AuthSession*> session,
-		not_null<MainWindow*> window);
+		not_null<Main::Session*> session,
+		not_null<::MainWindow*> window);
 
-	not_null<MainWindow*> window() const {
+	[[nodiscard]] not_null<::MainWindow*> window() const {
 		return _window;
 	}
+
+	[[nodiscard]] auto tabbedSelector() const
+	-> not_null<ChatHelpers::TabbedSelector*>;
+	void takeTabbedSelectorOwnershipFrom(not_null<QWidget*> parent);
+	[[nodiscard]] bool hasTabbedSelectorOwnership() const;
 
 	// This is needed for History TopBar updating when searchInChat
 	// is changed in the Dialogs::Widget of the current window.
@@ -289,13 +302,16 @@ private:
 	void pushToChatEntryHistory(Dialogs::RowDescriptor row);
 	bool chatEntryHistoryMove(int steps);
 
-	const not_null<MainWindow*> _window;
+	const not_null<::MainWindow*> _window;
 
 	std::unique_ptr<Passport::FormController> _passportForm;
 
 	GifPauseReasons _gifPauseReasons = 0;
 	base::Observable<void> _gifPauseLevelChanged;
 	base::Observable<void> _floatPlayerAreaUpdated;
+
+	// Depends on _gifPause*.
+	const std::unique_ptr<ChatHelpers::TabbedSelector> _tabbedSelector;
 
 	rpl::variable<Dialogs::RowDescriptor> _activeChatEntry;
 	base::Variable<bool> _dialogsListFocused = { false };

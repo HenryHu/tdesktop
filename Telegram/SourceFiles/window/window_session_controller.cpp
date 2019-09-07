@@ -21,11 +21,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_channel.h"
 #include "data/data_chat.h"
 #include "passport/passport_form_controller.h"
+#include "chat_helpers/tabbed_selector.h"
 #include "core/shortcuts.h"
+#include "base/unixtime.h"
 #include "boxes/calendar_box.h"
 #include "mainwidget.h"
 #include "mainwindow.h"
-#include "auth_session.h"
+#include "main/main_session.h"
 #include "apiwrap.h"
 #include "support/support_helper.h"
 #include "styles/style_window.h"
@@ -51,11 +53,11 @@ void DateClickHandler::onClick(ClickContext context) const {
 	App::wnd()->sessionController()->showJumpToDate(_chat, _date);
 }
 
-SessionNavigation::SessionNavigation(not_null<AuthSession*> session)
+SessionNavigation::SessionNavigation(not_null<Main::Session*> session)
 : _session(session) {
 }
 
-AuthSession &SessionNavigation::session() const {
+Main::Session &SessionNavigation::session() const {
 	return *_session;
 }
 
@@ -97,16 +99,18 @@ void SessionNavigation::showSettings(const SectionShow &params) {
 }
 
 SessionController::SessionController(
-	not_null<AuthSession*> session,
-	not_null<MainWindow*> window)
+	not_null<Main::Session*> session,
+	not_null<::MainWindow*> window)
 : SessionNavigation(session)
-, _window(window) {
+, _window(window)
+, _tabbedSelector(
+		std::make_unique<ChatHelpers::TabbedSelector>(window, this)) {
 	init();
 
 	subscribe(session->api().fullPeerUpdated(), [=](PeerData *peer) {
 		if (peer == _showEditPeer) {
 			_showEditPeer = nullptr;
-			Ui::show(Box<EditPeerInfoBox>(peer));
+			Ui::show(Box<EditPeerInfoBox>(this, peer));
 		}
 	});
 
@@ -119,6 +123,28 @@ SessionController::SessionController(
 		folder->updateChatListSortPosition();
 		closeFolder();
 	}, lifetime());
+}
+
+auto SessionController::tabbedSelector() const
+-> not_null<ChatHelpers::TabbedSelector*> {
+	return _tabbedSelector.get();
+}
+
+void SessionController::takeTabbedSelectorOwnershipFrom(
+		not_null<QWidget*> parent) {
+	if (_tabbedSelector->parent() == parent) {
+		if (const auto chats = _window->chatsWidget()) {
+			chats->returnTabbedSelector();
+		}
+		if (_tabbedSelector->parent() == parent) {
+			_tabbedSelector->hide();
+			_tabbedSelector->setParent(window());
+		}
+	}
+}
+
+bool SessionController::hasTabbedSelectorOwnership() const {
+	return (_tabbedSelector->parent() == window());
 }
 
 void SessionController::showEditPeerBox(PeerData *peer) {
@@ -492,13 +518,13 @@ void SessionController::showJumpToDate(Dialogs::Key chat, QDate requestedDate) {
 					}
 				}
 			} else if (history->chatListTimeId() != 0) {
-				return ParseDateTime(history->chatListTimeId()).date();
+				return base::unixtime::parse(history->chatListTimeId()).date();
 			}
 		//} else if (const auto feed = chat.feed()) { // #feed
 		//	if (chatScrollPosition(feed)) { // #TODO feeds save position
 
 		//	} else if (feed->chatListTimeId() != 0) {
-		//		return ParseDateTime(feed->chatListTimeId()).date();
+		//		return base::unixtime::parse(feed->chatListTimeId()).date();
 		//	}
 		}
 		return QDate();
@@ -509,11 +535,11 @@ void SessionController::showJumpToDate(Dialogs::Key chat, QDate requestedDate) {
 				history = channel->owner().historyLoaded(channel);
 			}
 			if (history && history->chatListTimeId() != 0) {
-				return ParseDateTime(history->chatListTimeId()).date();
+				return base::unixtime::parse(history->chatListTimeId()).date();
 			}
 		//} else if (const auto feed = chat.feed()) { // #feed
 		//	if (feed->chatListTimeId() != 0) {
-		//		return ParseDateTime(feed->chatListTimeId()).date();
+		//		return base::unixtime::parse(feed->chatListTimeId()).date();
 		//	}
 		}
 		return QDate::currentDate();

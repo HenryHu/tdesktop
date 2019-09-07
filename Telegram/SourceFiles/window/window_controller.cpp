@@ -18,7 +18,7 @@ Controller::Controller(not_null<Main::Account*> account)
 : _account(account)
 , _widget(this) {
 	_account->sessionValue(
-	) | rpl::start_with_next([=](AuthSession *session) {
+	) | rpl::start_with_next([=](Main::Session *session) {
 		_sessionController = session
 			? std::make_unique<SessionController>(session, &_widget)
 			: nullptr;
@@ -28,7 +28,10 @@ Controller::Controller(not_null<Main::Account*> account)
 	_widget.init();
 }
 
-Controller::~Controller() = default;
+Controller::~Controller() {
+	// We want to delete all widgets before the _sessionController.
+	_widget.clearWidgets();
+}
 
 void Controller::firstShow() {
 	_widget.firstShow();

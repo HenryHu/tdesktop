@@ -50,7 +50,7 @@ inline void CallDelayed(int duration, Guard &&object, Lambda &&lambda) {
 }
 
 template <typename Guard, typename Lambda>
-inline auto LambdaDelayed(int duration, Guard &&object, Lambda &&lambda) {
+[[nodiscard]] inline auto LambdaDelayed(int duration, Guard &&object, Lambda &&lambda) {
 	auto guarded = crl::guard(
 		std::forward<Guard>(object),
 		std::forward<Lambda>(lambda));
@@ -265,10 +265,6 @@ DeclareVar(QString, DownloadPath);
 DeclareVar(QByteArray, DownloadPathBookmark);
 DeclareRefVar(base::Observable<void>, DownloadPathChanged);
 
-DeclareVar(bool, ReplaceEmoji);
-DeclareVar(bool, SuggestEmoji);
-DeclareVar(bool, SuggestStickersByEmoji);
-DeclareRefVar(base::Observable<void>, ReplaceEmojiChanged);
 DeclareVar(bool, VoiceMsgPlaybackDoubled);
 DeclareVar(bool, SoundNotify);
 DeclareVar(bool, DesktopNotify);
@@ -300,8 +296,6 @@ DeclareVar(QString, CallInputDeviceID);
 DeclareVar(int, CallOutputVolume);
 DeclareVar(int, CallInputVolume);
 DeclareVar(bool, CallAudioDuckingEnabled);
-
-rpl::producer<bool> ReplaceEmojiValue();
 
 } // namespace Global
 

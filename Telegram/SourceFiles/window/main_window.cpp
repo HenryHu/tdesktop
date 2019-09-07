@@ -17,13 +17,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_outdated_bar.h"
 #include "window/window_controller.h"
 #include "boxes/confirm_box.h"
-#include "main/main_account.h" // Account::authSessionValue.
+#include "main/main_account.h" // Account::sessionValue.
 #include "core/click_handler_types.h"
 #include "core/application.h"
 #include "core/sandbox.h"
 #include "lang/lang_keys.h"
 #include "data/data_session.h"
-#include "auth_session.h"
+#include "main/main_session.h"
 #include "apiwrap.h"
 #include "mainwindow.h"
 #include "styles/style_window.h"
@@ -265,7 +265,6 @@ bool MainWindow::hideNoQuit() {
 }
 
 void MainWindow::clearWidgets() {
-	Ui::hideLayer(anim::type::instant);
 	clearWidgetsHook();
 	updateGlobalMenu();
 }
@@ -656,9 +655,6 @@ void MainWindow::setInactivePress(bool inactive) {
 	}
 }
 
-MainWindow::~MainWindow() {
-	// We want to delete all widgets before the _controller.
-	_body.destroy();
-}
+MainWindow::~MainWindow() = default;
 
 } // namespace Window

@@ -12,7 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_file_origin.h"
 #include "media/clip/media_clip_reader.h"
 #include "lottie/lottie_animation.h"
-#include "auth_session.h"
+#include "main/main_session.h"
 
 namespace Data {
 namespace {
@@ -31,7 +31,7 @@ QImage Prepare(
 		QByteArray data,
 		FileType type) {
 	if (type == FileType::Video) {
-		return Media::Clip::PrepareForSending(path, data).thumbnail;
+		return ::Media::Clip::PrepareForSending(path, data).thumbnail;
 	} else if (type == FileType::AnimatedSticker) {
 		return Lottie::ReadThumbnail(Lottie::ReadContent(data, path));
 	}

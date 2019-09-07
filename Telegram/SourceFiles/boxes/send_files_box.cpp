@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "chat_helpers/emoji_suggestions_widget.h"
 #include "chat_helpers/tabbed_panel.h"
 #include "chat_helpers/tabbed_selector.h"
+#include "history/view/history_view_schedule_box.h"
 #include "core/file_utilities.h"
 #include "core/mime_type.h"
 #include "core/event_filter.h"
@@ -30,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lottie/lottie_single_player.h"
 #include "data/data_document.h"
 #include "media/clip/media_clip_reader.h"
+#include "api/api_common.h"
 #include "window/window_session_controller.h"
 #include "layout.h"
 #include "styles/style_history.h"
@@ -1365,11 +1367,17 @@ SendFilesBox::SendFilesBox(
 	not_null<Window::SessionController*> controller,
 	Storage::PreparedList &&list,
 	const TextWithTags &caption,
-	CompressConfirm compressed)
+	CompressConfirm compressed,
+	SendLimit limit,
+	Api::SendType sendType,
+	SendMenuType sendMenuType)
 : _controller(controller)
+, _sendType(sendType)
 , _list(std::move(list))
 , _compressConfirmInitial(compressed)
 , _compressConfirm(compressed)
+, _sendLimit(limit)
+, _sendMenuType(sendMenuType)
 , _caption(
 	this,
 	st::confirmCaptionArea,
@@ -1466,7 +1474,14 @@ void SendFilesBox::setupShadows(
 }
 
 void SendFilesBox::prepare() {
-	_send = addButton(tr::lng_send_button(), [=] { send(); });
+	_send = addButton(tr::lng_send_button(), [=] { send({}); });
+	if (_sendType == Api::SendType::Normal) {
+		SetupSendMenu(
+			_send,
+			[=] { return _sendMenuType; },
+			[=] { sendSilent(); },
+			[=] { sendScheduled(); });
+	}
 	addButton(tr::lng_cancel(), [=] { closeBox(); });
 	initSendWay();
 	setupCaption();
@@ -1481,6 +1496,11 @@ void SendFilesBox::prepare() {
 void SendFilesBox::initSendWay() {
 	refreshAlbumMediaCount();
 	const auto value = [&] {
+		if (_sendLimit == SendLimit::One
+			&& _list.albumIsPossible
+			&& _list.files.size() > 1) {
+			return SendFilesWay::Album;
+		}
 		if (_compressConfirm == CompressConfirm::None) {
 			return SendFilesWay::Files;
 		} else if (_compressConfirm == CompressConfirm::No) {
@@ -1490,10 +1510,10 @@ void SendFilesBox::initSendWay() {
 				? SendFilesWay::Album
 				: SendFilesWay::Photos;
 		}
-		const auto currentWay = Auth().settings().sendFilesWay();
-		if (currentWay == SendFilesWay::Files) {
-			return currentWay;
-		} else if (currentWay == SendFilesWay::Album) {
+		const auto way = _controller->session().settings().sendFilesWay();
+		if (way == SendFilesWay::Files) {
+			return way;
+		} else if (way == SendFilesWay::Album) {
 			return _list.albumIsPossible
 				? SendFilesWay::Album
 				: SendFilesWay::Photos;
@@ -1514,9 +1534,24 @@ void SendFilesBox::initSendWay() {
 }
 
 void SendFilesBox::updateCaptionPlaceholder() {
-	if (_caption) {
-		const auto sendWay = _sendWay->value();
+	if (!_caption) {
+		return;
+	}
+	const auto sendWay = _sendWay->value();
+	const auto isAlbum = (sendWay == SendFilesWay::Album);
+	const auto compressImages = (sendWay != SendFilesWay::Files);
+	if (!_list.canAddCaption(isAlbum, compressImages)
+		&& _sendLimit == SendLimit::One) {
+		_caption->hide();
+		if (_emojiToggle) {
+			_emojiToggle->hide();
+		}
+	} else {
 		_caption->setPlaceholder(FieldPlaceholder(_list, sendWay));
+		_caption->show();
+		if (_emojiToggle) {
+			_emojiToggle->show();
+		}
 	}
 }
 
@@ -1554,7 +1589,8 @@ void SendFilesBox::setupSendWayControls() {
 	_sendAlbum.destroy();
 	_sendPhotos.destroy();
 	_sendFiles.destroy();
-	if (_compressConfirm == CompressConfirm::None) {
+	if (_compressConfirm == CompressConfirm::None
+		|| _sendLimit == SendLimit::One) {
 		return;
 	}
 	const auto addRadio = [&](
@@ -1614,7 +1650,7 @@ void SendFilesBox::setupCaption() {
 		const auto ctrlShiftEnter = modifiers.testFlag(Qt::ShiftModifier)
 			&& (modifiers.testFlag(Qt::ControlModifier)
 				|| modifiers.testFlag(Qt::MetaModifier));
-		send(ctrlShiftEnter);
+		send({}, ctrlShiftEnter);
 	});
 	connect(_caption, &Ui::InputField::cancelled, [=] { closeBox(); });
 	_caption->setMimeDataHook([=](
@@ -1628,18 +1664,23 @@ void SendFilesBox::setupCaption() {
 		Unexpected("action in MimeData hook.");
 	});
 	_caption->setInstantReplaces(Ui::InstantReplaces::Default());
-	_caption->setInstantReplacesEnabled(Global::ReplaceEmojiValue());
+	_caption->setInstantReplacesEnabled(
+		_controller->session().settings().replaceEmojiValue());
 	_caption->setMarkdownReplacesEnabled(rpl::single(true));
-	_caption->setEditLinkCallback(DefaultEditLinkCallback(_caption));
+	_caption->setEditLinkCallback(
+		DefaultEditLinkCallback(&_controller->session(), _caption));
 	Ui::Emoji::SuggestionsController::Init(
 		getDelegate()->outerContainer(),
-		_caption);
+		_caption,
+		&_controller->session());
 
 	updateCaptionPlaceholder();
 	setupEmojiPanel();
 }
 
 void SendFilesBox::setupEmojiPanel() {
+	Expects(_caption != nullptr);
+
 	const auto container = getDelegate()->outerContainer();
 	_emojiPanel = base::make_unique_q<ChatHelpers::TabbedPanel>(
 		container,
@@ -1653,7 +1694,7 @@ void SendFilesBox::setupEmojiPanel() {
 		st::emojiPanMinHeight / 2,
 		st::emojiPanMinHeight);
 	_emojiPanel->hide();
-	_emojiPanel->getSelector()->emojiChosen(
+	_emojiPanel->selector()->emojiChosen(
 	) | rpl::start_with_next([=](EmojiPtr emoji) {
 		Ui::InsertEmojiAtCursor(_caption->textCursor(), emoji);
 	}, lifetime());
@@ -1663,6 +1704,7 @@ void SendFilesBox::setupEmojiPanel() {
 		[=](not_null<QEvent*> event) { return emojiFilter(event); }));
 
 	_emojiToggle.create(this, st::boxAttachEmoji);
+	_emojiToggle->setVisible(!_caption->isHidden());
 	_emojiToggle->installEventFilter(_emojiPanel);
 	_emojiToggle->addClickHandler([=] {
 		_emojiPanel->toggleAnimated();
@@ -1769,7 +1811,7 @@ bool SendFilesBox::addFiles(not_null<const QMimeData*> data) {
 	_compressConfirm = _compressConfirmInitial;
 	refreshAlbumMediaCount();
 	preparePreview();
-	updateControlsGeometry();
+	captionResized();
 	return true;
 }
 
@@ -1812,7 +1854,7 @@ void SendFilesBox::keyPressEvent(QKeyEvent *e) {
 		const auto ctrl = modifiers.testFlag(Qt::ControlModifier)
 			|| modifiers.testFlag(Qt::MetaModifier);
 		const auto shift = modifiers.testFlag(Qt::ShiftModifier);
-		send(ctrl && shift);
+		send({}, ctrl && shift);
 	} else {
 		BoxContent::keyPressEvent(e);
 	}
@@ -1883,12 +1925,18 @@ void SendFilesBox::setInnerFocus() {
 	}
 }
 
-void SendFilesBox::send(bool ctrlShiftEnter) {
+void SendFilesBox::send(
+		Api::SendOptions options,
+		bool ctrlShiftEnter) {
+	if (_sendType == Api::SendType::Scheduled && !options.scheduled) {
+		return sendScheduled();
+	}
+
 	using Way = SendFilesWay;
 	const auto way = _sendWay ? _sendWay->value() : Way::Files;
 
 	if (_compressConfirm == CompressConfirm::Auto) {
-		const auto oldWay = Auth().settings().sendFilesWay();
+		const auto oldWay = _controller->session().settings().sendFilesWay();
 		if (way != oldWay) {
 			// Check if the user _could_ use the old value, but didn't.
 			if ((oldWay == Way::Album && _sendAlbum)
@@ -1896,8 +1944,8 @@ void SendFilesBox::send(bool ctrlShiftEnter) {
 				|| (oldWay == Way::Files && _sendFiles)
 				|| (way == Way::Files && (_sendAlbum || _sendPhotos))) {
 				// And in that case save it to settings.
-				Auth().settings().setSendFilesWay(way);
-				Auth().saveSettingsDelayed();
+				_controller->session().settings().setSendFilesWay(way);
+				_controller->session().saveSettingsDelayed();
 			}
 		}
 	}
@@ -1905,16 +1953,30 @@ void SendFilesBox::send(bool ctrlShiftEnter) {
 	applyAlbumOrder();
 	_confirmed = true;
 	if (_confirmedCallback) {
-		auto caption = _caption
+		auto caption = (_caption && !_caption->isHidden())
 			? _caption->getTextWithAppliedMarkdown()
 			: TextWithTags();
 		_confirmedCallback(
 			std::move(_list),
 			way,
 			std::move(caption),
+			options,
 			ctrlShiftEnter);
 	}
 	closeBox();
+}
+
+void SendFilesBox::sendSilent() {
+	auto options = Api::SendOptions();
+	options.silent = true;
+	send(options);
+}
+
+void SendFilesBox::sendScheduled() {
+	const auto callback = [=](Api::SendOptions options) { send(options); };
+	Ui::show(
+		HistoryView::PrepareScheduleBox(this, _sendMenuType, callback),
+		LayerOption::KeepOther);
 }
 
 SendFilesBox::~SendFilesBox() = default;

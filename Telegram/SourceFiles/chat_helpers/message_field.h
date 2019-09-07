@@ -10,7 +10,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/input_fields.h"
 #include "base/timer.h"
 
-class HistoryWidget;
+namespace Main {
+class Session;
+} // namespace Main
 
 namespace Window {
 class SessionController;
@@ -33,6 +35,7 @@ Fn<bool(
 	QString text,
 	QString link,
 	Ui::InputField::EditLinkAction action)> DefaultEditLinkCallback(
+		not_null<Main::Session*> session,
 		not_null<Ui::InputField*> field);
 void InitMessageField(
 	not_null<Window::SessionController*> controller,
@@ -54,7 +57,7 @@ struct AutocompleteQuery {
 AutocompleteQuery ParseMentionHashtagBotCommandQuery(
 	not_null<const Ui::InputField*> field);
 
-class QtConnectionOwner {
+class QtConnectionOwner final {
 public:
 	QtConnectionOwner(QMetaObject::Connection connection = {});
 	QtConnectionOwner(QtConnectionOwner &&other);
@@ -102,3 +105,16 @@ private:
 	QtConnectionOwner _connection;
 
 };
+
+enum class SendMenuType {
+	Disabled,
+	SilentOnly,
+	Scheduled,
+	Reminder,
+};
+
+void SetupSendMenu(
+	not_null<Ui::RpWidget*> button,
+	Fn<SendMenuType()> type,
+	Fn<void()> silent,
+	Fn<void()> schedule);

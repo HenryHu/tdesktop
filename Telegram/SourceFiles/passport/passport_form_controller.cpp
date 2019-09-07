@@ -16,13 +16,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_hardcoded.h"
 #include "base/openssl_help.h"
 #include "base/qthelp_url.h"
+#include "base/unixtime.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
 #include "mainwindow.h"
 #include "window/window_session_controller.h"
 #include "core/click_handler_types.h"
 #include "ui/toast/toast.h"
-#include "auth_session.h"
+#include "main/main_session.h"
 #include "storage/localimageloader.h"
 #include "storage/localstorage.h"
 #include "storage/file_upload.h"
@@ -1402,7 +1403,7 @@ void FormController::prepareFile(
 	file.fields.id = fileId;
 	file.fields.dcId = MTP::maindc();
 	file.fields.secret = GenerateSecretBytes();
-	file.fields.date = unixtime();
+	file.fields.date = base::unixtime::now();
 	file.fields.image = ReadImage(bytes::make_span(content));
 	file.fields.downloadOffset = file.fields.size;
 
@@ -1509,7 +1510,7 @@ void FormController::uploadEncryptedFile(
 	auto prepared = std::make_shared<FileLoadResult>(
 		TaskId(),
 		file.uploadData->fileId,
-		FileLoadTo(PeerId(0), false, MsgId(0)),
+		FileLoadTo(PeerId(0), Api::SendOptions(), MsgId(0)),
 		TextWithTags(),
 		std::shared_ptr<SendingAlbum>(nullptr));
 	prepared->type = SendMediaType::Secure;
@@ -1519,7 +1520,9 @@ void FormController::uploadEncryptedFile(
 	prepared->setFileData(prepared->content);
 	prepared->filemd5 = file.uploadData->md5checksum;
 
-	file.uploadData->fullId = FullMsgId(0, clientMsgId());
+	file.uploadData->fullId = FullMsgId(
+		0,
+		Auth().data().nextLocalMessageId());
 	Auth().uploader().upload(file.uploadData->fullId, std::move(prepared));
 }
 
@@ -2083,9 +2086,7 @@ QString FormController::getPlainTextFromValue(
 void FormController::startPhoneVerification(not_null<Value*> value) {
 	value->verification.requestId = request(MTPaccount_SendVerifyPhoneCode(
 		MTP_string(getPhoneFromValue(value)),
-		MTP_codeSettings(
-			MTP_flags(0),
-			MTPstring())
+		MTP_codeSettings(MTP_flags(0))
 	)).done([=](const MTPauth_SentCode &result) {
 		Expects(result.type() == mtpc_auth_sentCode);
 

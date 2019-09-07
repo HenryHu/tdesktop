@@ -8,6 +8,9 @@
   'includes': [
     'common.gypi',
   ],
+  'variables': {
+    'build_standard_win': 'c++14',
+  },
   'targets': [{
     'target_name': 'lib_rlottie',
     'type': 'static_library',
@@ -17,6 +20,7 @@
     ],
     'variables': {
       'official_build_target%': '',
+      'build_standard_win': 'c++14',
       'submodules_loc': '../ThirdParty',
       'libs_loc': '../../../Libraries',
       'rlottie_loc': '<(submodules_loc)/rlottie',
@@ -24,7 +28,7 @@
     },
     'defines': [
       '_USE_MATH_DEFINES',
-      'RAPIDJSON_ASSERT=',
+      'RAPIDJSON_ASSERT=(void)',
       'LOT_BUILD',
     ],
     'include_dirs': [
@@ -111,11 +115,7 @@
       '<(rlottie_src)/vector/vstackallocator.h',
       '<(rlottie_src)/vector/vtaskqueue.h',
     ],
-    'conditions': [[ 'not build_win', {
-      'defines': [
-        'RLOTTIE_WITH_STATIC_QT',
-      ]
-    }], [ 'build_macold', {
+    'conditions': [[ 'build_macold', {
       'xcode_settings': {
         'OTHER_CPLUSPLUSFLAGS': [ '-nostdinc++' ],
       },

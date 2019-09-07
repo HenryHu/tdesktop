@@ -14,13 +14,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/qthelp_url.h"
 #include "boxes/abstract_box.h"
 #include "ui/wrap/vertical_layout.h"
+#include "ui/widgets/popup_menu.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
+#include "core/event_filter.h"
 #include "chat_helpers/emoji_suggestions_widget.h"
 #include "window/window_session_controller.h"
 #include "lang/lang_keys.h"
 #include "mainwindow.h"
-#include "auth_session.h"
+#include "main/main_session.h"
 #include "styles/style_boxes.h"
 #include "styles/style_history.h"
 
@@ -61,6 +63,7 @@ class EditLinkBox : public BoxContent {
 public:
 	EditLinkBox(
 		QWidget*,
+		not_null<Main::Session*> session,
 		const QString &text,
 		const QString &link,
 		Fn<void(QString, QString)> callback);
@@ -71,6 +74,7 @@ protected:
 	void prepare() override;
 
 private:
+	const not_null<Main::Session*> _session;
 	QString _startText;
 	QString _startLink;
 	Fn<void(QString, QString)> _callback;
@@ -90,10 +94,12 @@ private:
 
 EditLinkBox::EditLinkBox(
 	QWidget*,
+	not_null<Main::Session*> session,
 	const QString &text,
 	const QString &link,
 	Fn<void(QString, QString)> callback)
-: _startText(text)
+: _session(session)
+, _startText(text)
 , _startLink(link)
 , _callback(std::move(callback)) {
 	Expects(_callback != nullptr);
@@ -116,10 +122,12 @@ void EditLinkBox::prepare() {
 			_startText),
 		st::markdownLinkFieldPadding);
 	text->setInstantReplaces(Ui::InstantReplaces::Default());
-	text->setInstantReplacesEnabled(Global::ReplaceEmojiValue());
+	text->setInstantReplacesEnabled(
+		_session->settings().replaceEmojiValue());
 	Ui::Emoji::SuggestionsController::Init(
 		getDelegate()->outerContainer(),
-		text);
+		text,
+		_session);
 
 	const auto url = content->add(
 		object_ptr<Ui::InputField>(
@@ -338,6 +346,7 @@ Fn<bool(
 	QString text,
 	QString link,
 	EditLinkAction action)> DefaultEditLinkCallback(
+		not_null<Main::Session*> session,
 		not_null<Ui::InputField*> field) {
 	const auto weak = make_weak(field);
 	return [=](
@@ -349,7 +358,7 @@ Fn<bool(
 			return Ui::InputField::IsValidMarkdownLink(link)
 				&& !IsMentionLink(link);
 		}
-		Ui::show(Box<EditLinkBox>(text, link, [=](
+		Ui::show(Box<EditLinkBox>(session, text, link, [=](
 				const QString &text,
 				const QString &link) {
 			if (const auto strong = weak.data()) {
@@ -373,9 +382,11 @@ void InitMessageField(
 
 	field->customTab(true);
 	field->setInstantReplaces(Ui::InstantReplaces::Default());
-	field->setInstantReplacesEnabled(Global::ReplaceEmojiValue());
+	field->setInstantReplacesEnabled(
+		controller->session().settings().replaceEmojiValue());
 	field->setMarkdownReplacesEnabled(rpl::single(true));
-	field->setEditLinkCallback(DefaultEditLinkCallback(field));
+	field->setEditLinkCallback(
+		DefaultEditLinkCallback(&controller->session(), field));
 }
 
 bool HasSendText(not_null<const Ui::InputField*> field) {
@@ -445,8 +456,9 @@ InlineBotQuery ParseInlineBotQuery(not_null<const Ui::InputField*> field) {
 			if (result.lookingUpBot) {
 				result.query = QString();
 				return result;
-			} else if (result.bot && (!result.bot->botInfo
-				|| result.bot->botInfo->inlinePlaceholder.isEmpty())) {
+			} else if (result.bot
+				&& (!result.bot->isBot()
+					|| result.bot->botInfo->inlinePlaceholder.isEmpty())) {
 				result.bot = nullptr;
 			} else {
 				result.query = inlineUsernameEqualsText
@@ -770,4 +782,42 @@ void MessageLinksParser::apply(
 		parsed.push_back(computeLink(range).toString());
 	}
 	_list = std::move(parsed);
+}
+
+void SetupSendMenu(
+		not_null<Ui::RpWidget*> button,
+		Fn<SendMenuType()> type,
+		Fn<void()> silent,
+		Fn<void()> schedule) {
+	if (!silent && !schedule) {
+		return;
+	}
+	const auto menu = std::make_shared<base::unique_qptr<Ui::PopupMenu>>();
+	const auto showMenu = [=] {
+		const auto now = type();
+		if (now == SendMenuType::Disabled
+			|| (!silent && now == SendMenuType::SilentOnly)) {
+			return false;
+		}
+
+		*menu = base::make_unique_q<Ui::PopupMenu>(button);
+		if (silent && now != SendMenuType::Reminder) {
+			(*menu)->addAction(tr::lng_send_silent_message(tr::now), silent);
+		}
+		if (schedule && now != SendMenuType::SilentOnly) {
+			(*menu)->addAction(
+				(now == SendMenuType::Scheduled
+					? tr::lng_schedule_message(tr::now)
+					: tr::lng_reminder_message(tr::now)),
+				schedule);
+		}
+		(*menu)->popup(QCursor::pos());
+		return true;
+	};
+	Core::InstallEventFilter(button, [=](not_null<QEvent*> e) {
+		if (e->type() == QEvent::ContextMenu && showMenu()) {
+			return true;
+		}
+		return false;
+	});
 }

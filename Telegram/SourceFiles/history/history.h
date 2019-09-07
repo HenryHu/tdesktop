@@ -22,8 +22,10 @@ class HistoryBlock;
 class HistoryItem;
 class HistoryMessage;
 class HistoryService;
-class HistoryMedia;
-class AuthSession;
+
+namespace Main {
+class Session;
+} // namespace Main
 
 namespace Data {
 struct Draft;
@@ -39,10 +41,6 @@ class IndexedList;
 namespace HistoryView {
 class Element;
 } // namespace HistoryView
-
-namespace AdminLog {
-class LocalIdManager;
-} // namespace AdminLog
 
 enum class NewMessageType {
 	Unread,
@@ -70,8 +68,7 @@ public:
 	not_null<History*> migrateToOrMe() const;
 	History *migrateFrom() const;
 	MsgRange rangeForDifferenceRequest() const;
-	HistoryService *insertJoinedMessage(bool unread);
-	void checkJoinedMessage(bool createUnread = false);
+	void checkLocalMessages();
 	void removeJoinedMessage();
 
 	bool isEmpty() const;
@@ -91,27 +88,27 @@ public:
 	void clear(ClearType type);
 	void clearUpTill(MsgId availableMinId);
 
-	void applyGroupAdminChanges(
-		const base::flat_map<UserId, bool> &changes);
+	void applyGroupAdminChanges(const base::flat_set<UserId> &changes);
 
-	HistoryItem *addNewMessage(const MTPMessage &msg, NewMessageType type);
-	HistoryItem *addToHistory(const MTPMessage &msg);
-	not_null<HistoryItem*> addNewService(
-		MsgId msgId,
-		TimeId date,
-		const QString &text,
-		MTPDmessage::Flags flags = 0,
-		bool newMsg = true);
-	not_null<HistoryItem*> addNewForwarded(
+	HistoryItem *addNewMessage(
+		const MTPMessage &msg,
+		MTPDmessage_ClientFlags clientFlags,
+		NewMessageType type);
+	HistoryItem *addToHistory(
+		const MTPMessage &msg,
+		MTPDmessage_ClientFlags clientFlags);
+	not_null<HistoryItem*> addNewLocalMessage(
 		MsgId id,
 		MTPDmessage::Flags flags,
+		MTPDmessage_ClientFlags clientFlags,
 		TimeId date,
 		UserId from,
 		const QString &postAuthor,
-		not_null<HistoryMessage*> original);
-	not_null<HistoryItem*> addNewDocument(
+		not_null<HistoryMessage*> forwardOriginal);
+	not_null<HistoryItem*> addNewLocalMessage(
 		MsgId id,
 		MTPDmessage::Flags flags,
+		MTPDmessage_ClientFlags clientFlags,
 		UserId viaBotId,
 		MsgId replyTo,
 		TimeId date,
@@ -120,9 +117,10 @@ public:
 		not_null<DocumentData*> document,
 		const TextWithEntities &caption,
 		const MTPReplyMarkup &markup);
-	not_null<HistoryItem*> addNewPhoto(
+	not_null<HistoryItem*> addNewLocalMessage(
 		MsgId id,
 		MTPDmessage::Flags flags,
+		MTPDmessage_ClientFlags clientFlags,
 		UserId viaBotId,
 		MsgId replyTo,
 		TimeId date,
@@ -131,9 +129,10 @@ public:
 		not_null<PhotoData*> photo,
 		const TextWithEntities &caption,
 		const MTPReplyMarkup &markup);
-	not_null<HistoryItem*> addNewGame(
+	not_null<HistoryItem*> addNewLocalMessage(
 		MsgId id,
 		MTPDmessage::Flags flags,
+		MTPDmessage_ClientFlags clientFlags,
 		UserId viaBotId,
 		MsgId replyTo,
 		TimeId date,
@@ -145,6 +144,7 @@ public:
 	// Used only internally and for channel admin log.
 	HistoryItem *createItem(
 		const MTPMessage &message,
+		MTPDmessage_ClientFlags clientFlags,
 		bool detachExistingItem);
 	std::vector<not_null<HistoryItem*>> createItems(
 		const QVector<MTPMessage> &data);
@@ -153,6 +153,10 @@ public:
 	void addNewerSlice(const QVector<MTPMessage> &slice);
 
 	void newItemAdded(not_null<HistoryItem*> item);
+
+	void registerLocalMessage(not_null<HistoryItem*> item);
+	void unregisterLocalMessage(not_null<HistoryItem*> item);
+	[[nodiscard]] HistoryItem *latestSendingMessage() const;
 
 	MsgId readInbox();
 	void applyInboxReadUpdate(
@@ -164,34 +168,36 @@ public:
 	void inboxRead(not_null<const HistoryItem*> wasRead);
 	void outboxRead(MsgId upTo);
 	void outboxRead(not_null<const HistoryItem*> wasRead);
-	bool isServerSideUnread(not_null<const HistoryItem*> item) const;
-	MsgId loadAroundId() const;
+	[[nodiscard]] bool isServerSideUnread(
+		not_null<const HistoryItem*> item) const;
+	[[nodiscard]] MsgId loadAroundId() const;
 
-	int unreadCount() const;
-	bool unreadCountKnown() const;
+	[[nodiscard]] int unreadCount() const;
+	[[nodiscard]] bool unreadCountKnown() const;
 	void setUnreadCount(int newUnreadCount);
 	void setUnreadMark(bool unread);
-	bool unreadMark() const;
-	int unreadCountForBadge() const; // unreadCount || unreadMark ? 1 : 0.
-	bool mute() const;
+	[[nodiscard]] bool unreadMark() const;
+	[[nodiscard]] int unreadCountForBadge() const; // unreadCount || unreadMark ? 1 : 0.
+	[[nodiscard]] bool mute() const;
 	bool changeMute(bool newMute);
 	void addUnreadBar();
 	void destroyUnreadBar();
-	bool hasNotFreezedUnreadBar() const;
-	Element *unreadBar() const;
+	[[nodiscard]] bool hasNotFreezedUnreadBar() const;
+	[[nodiscard]] Element *unreadBar() const;
 	void calculateFirstUnreadMessage();
 	void unsetFirstUnreadMessage();
-	Element *firstUnreadMessage() const;
+	[[nodiscard]] Element *firstUnreadMessage() const;
 	void clearNotifications();
+	void clearIncomingNotifications();
 
-	bool loadedAtBottom() const; // last message is in the list
+	[[nodiscard]] bool loadedAtBottom() const; // last message is in the list
 	void setNotLoadedAtBottom();
-	bool loadedAtTop() const; // nothing was added after loading history back
-	bool isReadyFor(MsgId msgId); // has messages for showing history at msgId
+	[[nodiscard]] bool loadedAtTop() const; // nothing was added after loading history back
+	[[nodiscard]] bool isReadyFor(MsgId msgId); // has messages for showing history at msgId
 	void getReadyFor(MsgId msgId);
 
-	HistoryItem *lastMessage() const;
-	bool lastMessageKnown() const;
+	[[nodiscard]] HistoryItem *lastMessage() const;
+	[[nodiscard]] bool lastMessageKnown() const;
 	void unknownMessageDeleted(MsgId messageId);
 	void applyDialogTopMessage(MsgId topMessageId);
 	void applyDialog(Data::Folder *requestFolder, const MTPDdialog &data);
@@ -209,6 +215,7 @@ public:
 	HistoryItem *lastSentMessage() const;
 
 	void resizeToWidth(int newWidth);
+	void forceFullResize();
 	int height() const;
 
 	void itemRemoved(not_null<HistoryItem*> item);
@@ -328,7 +335,7 @@ public:
 	// of the displayed window relative to the history start coordinate
 	void countScrollState(int top);
 
-	std::shared_ptr<AdminLog::LocalIdManager> adminLogIdManager();
+	MsgId nextNonHistoryEntryId();
 
 	bool folderKnown() const override;
 	Data::Folder *folder() const override;
@@ -382,8 +389,6 @@ private:
 	// helper method for countScrollState(int top)
 	void countScrollTopItem(int top);
 
-	HistoryItem *addNewToLastBlock(const MTPMessage &msg, NewMessageType type);
-
 	// this method just removes a block from the blocks list
 	// when the last item from this block was detached and
 	// calls the required previousItemChanged()
@@ -391,6 +396,9 @@ private:
 	void clearSharedMedia();
 
 	not_null<HistoryItem*> addNewItem(
+		not_null<HistoryItem*> item,
+		bool unread);
+	not_null<HistoryItem*> addNewToBack(
 		not_null<HistoryItem*> item,
 		bool unread);
 	not_null<HistoryItem*> addNewInTheMiddle(
@@ -470,6 +478,9 @@ private:
 
 	void createLocalDraftFromCloud();
 
+	HistoryService *insertJoinedMessage();
+	void insertLocalMessage(not_null<HistoryItem*> item);
+
 	void setFolderPointer(Data::Folder *folder);
 
 	Flags _flags = 0;
@@ -490,6 +501,7 @@ private:
 	std::optional<int> _unreadMentionsCount;
 	base::flat_set<MsgId> _unreadMentions;
 	std::optional<HistoryItem*> _lastMessage;
+	base::flat_set<not_null<HistoryItem*>> _localMessages;
 
 	// This almost always is equal to _lastMessage. The only difference is
 	// for a group that migrated to a supergroup. Then _lastMessage can
@@ -521,8 +533,6 @@ private:
 	base::flat_map<SendAction::Type, crl::time> _mySendActions;
 
 	std::deque<not_null<HistoryItem*>> _notifications;
-
-	std::weak_ptr<AdminLog::LocalIdManager> _adminLogIdManager;
 
  };
 

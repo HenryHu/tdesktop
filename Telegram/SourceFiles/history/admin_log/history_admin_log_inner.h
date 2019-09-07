@@ -16,6 +16,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/sender.h"
 #include "base/timer.h"
 
+namespace Main {
+class Session;
+} // namespace Main
+
 namespace HistoryView {
 class Element;
 struct TextState;
@@ -48,11 +52,13 @@ public:
 		not_null<Window::SessionController*> controller,
 		not_null<ChannelData*> channel);
 
-	base::Observable<void> showSearchSignal;
-	base::Observable<int> scrollToSignal;
-	base::Observable<void> cancelledSignal;
+	[[nodiscard]] Main::Session &session() const;
 
-	not_null<ChannelData*> channel() const {
+	[[nodiscard]] rpl::producer<> showSearchSignal() const;
+	[[nodiscard]] rpl::producer<int> scrollToSignal() const;
+	[[nodiscard]] rpl::producer<> cancelSignal() const;
+
+	[[nodiscard]] not_null<ChannelData*> channel() const {
 		return _channel;
 	}
 
@@ -93,6 +99,8 @@ public:
 		not_null<const HistoryView::Element*> view,
 		int from,
 		int till) override;
+	void elementStartStickerLoop(
+		not_null<const HistoryView::Element*> view) override;
 
 	~InnerWidget();
 
@@ -213,6 +221,7 @@ private:
 	std::vector<OwnedItem> _items;
 	std::set<uint64> _eventIds;
 	std::map<not_null<const HistoryItem*>, not_null<Element*>> _itemsByData;
+	base::flat_set<FullMsgId> _animatedStickersPlayed;
 	int _itemsTop = 0;
 	int _itemsWidth = 0;
 	int _itemsHeight = 0;
@@ -267,7 +276,9 @@ private:
 	std::vector<not_null<UserData*>> _adminsCanEdit;
 	Fn<void(FilterValue &&filter)> _showFilterCallback;
 
-	std::shared_ptr<LocalIdManager> _idManager;
+	rpl::event_stream<> _showSearchSignal;
+	rpl::event_stream<int> _scrollToSignal;
+	rpl::event_stream<> _cancelSignal;
 
 };
 

@@ -7,11 +7,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include "base/observer.h"
+#include "core/core_settings.h"
 #include "mtproto/auth_key.h"
+#include "base/observer.h"
 #include "base/timer.h"
 
-class AuthSessionSettings;
 class MainWindow;
 class MainWidget;
 class FileUploader;
@@ -95,9 +95,6 @@ public:
 	bool closeActiveWindow();
 	bool minimizeActiveWindow();
 	QWidget *getFileDialogParent();
-	QWidget *getGlobalShortcutParent() {
-		return &_globalShortcutParent;
-	}
 
 	// Media view interface.
 	void checkMediaViewActivation();
@@ -116,53 +113,40 @@ public:
 		return _logoNoMargin;
 	}
 
-	// MTProto components.
+	[[nodiscard]] Settings &settings() {
+		return _settings;
+	}
+	void moveSettingsFrom(Settings &&other);
+	void saveSettingsDelayed(crl::time delay = kDefaultSaveDelay);
+
+	// Dc options and proxy.
 	MTP::DcOptions *dcOptions() {
 		return _dcOptions.get();
 	}
+	struct ProxyChange {
+		ProxyData was;
+		ProxyData now;
+	};
 	void setCurrentProxy(
 		const ProxyData &proxy,
 		ProxyData::Settings settings);
+	[[nodiscard]] rpl::producer<ProxyChange> proxyChanges() const;
 	void badMtprotoConfigurationError();
 
-	// Set from legacy storage.
-	void setMtpMainDcId(MTP::DcId mainDcId);
-	void setMtpKey(MTP::DcId dcId, const MTP::AuthKey::Data &keyData);
-	void setAuthSessionUserId(UserId userId);
-	void setAuthSessionFromStorage(
-		std::unique_ptr<AuthSessionSettings> data,
-		QByteArray &&selfSerialized,
-		int32 selfStreamVersion);
-	AuthSessionSettings *getAuthSessionSettings();
-
-	// Serialization.
-	QByteArray serializeMtpAuthorization() const;
-	void setMtpAuthorization(const QByteArray &serialized);
-
-	void startMtp();
-	MTP::Instance *mtp() {
-		return _mtproto.get();
-	}
-	void suggestMainDcId(MTP::DcId mainDcId);
-	void destroyStaleAuthorizationKeys();
-	void configUpdated();
-	[[nodiscard]] rpl::producer<> configUpdates() const;
-
 	// Databases.
-	Storage::Databases &databases() {
+	[[nodiscard]] Storage::Databases &databases() {
 		return *_databases;
 	}
 
 	// Account component.
-	Main::Account &activeAccount() const {
+	[[nodiscard]] Main::Account &activeAccount() const {
 		return *_account;
 	}
+	[[nodiscard]] bool exportPreventsQuit();
 
-	// AuthSession component.
-	void authSessionCreate(const MTPUser &user);
-	int unreadBadge() const;
+	// Main::Session component.
+	[[nodiscard]] int unreadBadge() const;
 	bool unreadBadgeMuted() const;
-	void logOut();
 
 	// Media component.
 	Media::Audio::Instance &audio() {
@@ -241,11 +225,10 @@ protected:
 	bool eventFilter(QObject *object, QEvent *event) override;
 
 private:
+	static constexpr auto kDefaultSaveDelay = crl::time(1000);
+
 	friend bool IsAppLaunched();
 	friend Application &App();
-
-	void destroyMtpKeys(MTP::AuthKeysList &&keys);
-	void allKeysDestroyed();
 
 	void startLocalStorage();
 	void startShortcuts();
@@ -256,23 +239,29 @@ private:
 	static void QuitAttempt();
 	void quitDelayed();
 
-	void resetAuthorizationKeys();
-	void authSessionDestroy();
 	void clearPasscodeLock();
-	void loggedOut();
 
 	static Application *Instance;
+	struct InstanceSetter {
+		InstanceSetter(not_null<Application*> instance) {
+			Expects(Instance == nullptr);
+
+			Instance = instance;
+		}
+	};
+	InstanceSetter _setter = { this };
 
 	not_null<Launcher*> _launcher;
+	rpl::event_stream<ProxyChange> _proxyChanges;
 
 	// Some fields are just moved from the declaration.
 	struct Private;
 	const std::unique_ptr<Private> _private;
-
-	QWidget _globalShortcutParent;
+	Settings _settings;
 
 	const std::unique_ptr<Storage::Databases> _databases;
 	const std::unique_ptr<Ui::Animations::Manager> _animationsManager;
+	const std::unique_ptr<MTP::DcOptions> _dcOptions;
 	const std::unique_ptr<Main::Account> _account;
 	std::unique_ptr<Window::Controller> _window;
 	std::unique_ptr<Media::View::OverlayWidget> _mediaView;
@@ -280,10 +269,6 @@ private:
 	std::unique_ptr<Lang::CloudManager> _langCloudManager;
 	const std::unique_ptr<ChatHelpers::EmojiKeywords> _emojiKeywords;
 	std::unique_ptr<Lang::Translator> _translator;
-	std::unique_ptr<MTP::DcOptions> _dcOptions;
-	std::unique_ptr<MTP::Instance> _mtproto;
-	std::unique_ptr<MTP::Instance> _mtprotoForKeysDestroy;
-	rpl::event_stream<> _configUpdates;
 	base::Observable<void> _passcodedChanged;
 	QPointer<BoxContent> _badProxyDisableBox;
 
@@ -296,6 +281,7 @@ private:
 	std::unique_ptr<Window::TermsLock> _termsLock;
 
 	base::DelayedCallTimer _callDelayedTimer;
+	base::Timer _saveSettingsTimer;
 
 	struct LeaveSubscription {
 		LeaveSubscription(

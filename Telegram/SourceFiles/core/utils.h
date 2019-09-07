@@ -14,10 +14,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/assertion.h"
 #include "base/bytes.h"
 
+#include <crl/crl_time.h>
 #include <QtCore/QReadWriteLock>
 #include <QtCore/QRegularExpression>
 #include <QtNetwork/QNetworkProxy>
-
 #include <cmath>
 #include <set>
 
@@ -55,12 +55,6 @@ inline bool in_range(Value &&value, From &&from, Till &&till) {
 // while "for_const (T *p, v)" won't and "for_const (T *&p, v)" won't compile
 #define for_const(range_declaration, range_expression) for (range_declaration : std::as_const(range_expression))
 
-template <typename Lambda>
-inline void InvokeQueued(const QObject *context, Lambda &&lambda) {
-	QObject proxy;
-	QObject::connect(&proxy, &QObject::destroyed, context, std::forward<Lambda>(lambda), Qt::QueuedConnection);
-}
-
 static const int32 ScrollMax = INT_MAX;
 
 extern uint64 _SharedMemoryLocation[];
@@ -73,8 +67,12 @@ T *SharedMemoryLocation() {
 // see https://github.com/boostcon/cppnow_presentations_2012/blob/master/wed/schurr_cpp11_tools_for_class_authors.pdf
 class str_const { // constexpr string
 public:
-	template<std::size_t N>
-	constexpr str_const(const char(&a)[N]) : _str(a), _size(N - 1) {
+	constexpr str_const(const char *str, std::size_t size)
+	: _str(str)
+	, _size(size) {
+	}
+	template <std::size_t N>
+	constexpr str_const(const char(&a)[N]) : str_const(a, N - 1) {
 	}
 	constexpr char operator[](std::size_t n) const {
 		return (n < _size) ? _str[n] :
@@ -85,7 +83,7 @@ public:
 #endif // OS_MAC_OLD
 	}
 	constexpr std::size_t size() const { return _size; }
-	const char *c_str() const { return _str; }
+	constexpr const char *c_str() const { return _str; }
 
 private:
 	const char* const _str;
@@ -101,14 +99,7 @@ inline QByteArray str_const_toByteArray(const str_const &str) {
 	return QByteArray::fromRawData(str.c_str(), str.size());
 }
 
-void unixtimeInit();
-void unixtimeSet(TimeId serverTime, bool force = false);
-TimeId unixtime();
-uint64 msgid();
 int GetNextRequestId();
-
-QDateTime ParseDateTime(TimeId serverTime);
-TimeId ServerTimeFromParsed(const QDateTime &date);
 
 inline void mylocaltime(struct tm * _Tm, const time_t * _Time) {
 #ifdef Q_OS_WIN
@@ -189,17 +180,6 @@ T rand_value() {
 	return result;
 }
 
-inline void memset_rand_bad(void *data, uint32 len) {
-	for (uchar *i = reinterpret_cast<uchar*>(data), *e = i + len; i != e; ++i) {
-		*i = uchar(rand() & 0xFF);
-	}
-}
-
-template <typename T>
-inline void memsetrnd_bad(T &value) {
-	memset_rand_bad(&value, sizeof(value));
-}
-
 class ReadLockerAttempt {
 public:
 	ReadLockerAttempt(not_null<QReadWriteLock*> lock) : _lock(lock), _locked(_lock->tryLockForRead()) {
@@ -276,6 +256,11 @@ struct ProxyData {
 		Http,
 		Mtproto,
 	};
+	enum class Status {
+		Valid,
+		Unsupported,
+		Invalid,
+	};
 
 	Type type = Type::None;
 	QString host;
@@ -285,16 +270,18 @@ struct ProxyData {
 	std::vector<QString> resolvedIPs;
 	crl::time resolvedExpireAt = 0;
 
-	bool valid() const;
-	bool supportsCalls() const;
-	bool tryCustomResolve() const;
-	bytes::vector secretFromMtprotoPassword() const;
-	explicit operator bool() const;
-	bool operator==(const ProxyData &other) const;
-	bool operator!=(const ProxyData &other) const;
+	[[nodiscard]] bool valid() const;
+	[[nodiscard]] Status status() const;
+	[[nodiscard]] bool supportsCalls() const;
+	[[nodiscard]] bool tryCustomResolve() const;
+	[[nodiscard]] bytes::vector secretFromMtprotoPassword() const;
+	[[nodiscard]] explicit operator bool() const;
+	[[nodiscard]] bool operator==(const ProxyData &other) const;
+	[[nodiscard]] bool operator!=(const ProxyData &other) const;
 
-	static bool ValidMtprotoPassword(const QString &secret);
-	static int MaxMtprotoPasswordLength();
+	[[nodiscard]] static bool ValidMtprotoPassword(const QString &password);
+	[[nodiscard]] static Status MtprotoPasswordStatus(
+		const QString &password);
 
 };
 

@@ -10,7 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/file_download.h"
 #include "storage/cache/storage_cache_database.h"
 #include "storage/localimageloader.h"
-#include "auth_session.h"
+#include "main/main_session.h"
 
 namespace Data {
 class WallPaper;
@@ -152,7 +152,7 @@ bool readBackground();
 
 void writeTheme(const Window::Theme::Saved &saved);
 void clearTheme();
-bool copyThemeColorsToPalette(const QString &file);
+bool copyThemeColorsToPalette(const QString &destination);
 Window::Theme::Saved readThemeAfterSwitch();
 
 void writeLangPack();

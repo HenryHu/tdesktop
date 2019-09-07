@@ -9,8 +9,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "styles/style_history.h"
 #include "history/history.h"
-#include "history/media/history_media.h"
-#include "history/media/history_media_web_page.h"
+#include "history/view/media/history_view_media.h"
+#include "history/view/media/history_view_web_page.h"
 #include "history/history_message.h"
 #include "history/history_item_components.h"
 #include "history/history_item_text.h"
@@ -28,7 +28,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "layout.h"
 #include "window/window_session_controller.h"
-#include "auth_session.h"
+#include "main/main_session.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/image/image.h"
 #include "ui/text/text_utilities.h"
@@ -219,50 +219,52 @@ InnerWidget::InnerWidget(
 , _controller(controller)
 , _channel(channel)
 , _history(channel->owner().history(channel))
-, _scrollDateCheck([this] { scrollDateCheck(); })
+, _scrollDateCheck([=] { scrollDateCheck(); })
 , _emptyText(
-	st::historyAdminLogEmptyWidth
-	- st::historyAdminLogEmptyPadding.left()
-	- st::historyAdminLogEmptyPadding.left())
-, _idManager(_history->adminLogIdManager()) {
+		st::historyAdminLogEmptyWidth
+		- st::historyAdminLogEmptyPadding.left()
+		- st::historyAdminLogEmptyPadding.left()) {
 	setMouseTracking(true);
-	_scrollDateHideTimer.setCallback([this] { scrollDateHideByTimer(); });
-	Auth().data().viewRepaintRequest(
-	) | rpl::start_with_next([this](auto view) {
+	_scrollDateHideTimer.setCallback([=] { scrollDateHideByTimer(); });
+	session().data().viewRepaintRequest(
+	) | rpl::start_with_next([=](auto view) {
 		if (view->delegate() == this) {
 			repaintItem(view);
 		}
 	}, lifetime());
-	Auth().data().viewResizeRequest(
-	) | rpl::start_with_next([this](auto view) {
+	session().data().viewResizeRequest(
+	) | rpl::start_with_next([=](auto view) {
 		if (view->delegate() == this) {
 			resizeItem(view);
 		}
 	}, lifetime());
-	Auth().data().itemViewRefreshRequest(
-	) | rpl::start_with_next([this](auto item) {
+	session().data().itemViewRefreshRequest(
+	) | rpl::start_with_next([=](auto item) {
 		if (const auto view = viewForItem(item)) {
 			refreshItem(view);
 		}
 	}, lifetime());
-	Auth().data().viewLayoutChanged(
-	) | rpl::start_with_next([this](auto view) {
+	session().data().viewLayoutChanged(
+	) | rpl::start_with_next([=](auto view) {
 		if (view->delegate() == this) {
 			if (view->isUnderCursor()) {
 				updateSelected();
 			}
 		}
 	}, lifetime());
-	Auth().data().animationPlayInlineRequest(
-	) | rpl::start_with_next([this](auto item) {
+	session().data().animationPlayInlineRequest(
+	) | rpl::start_with_next([=](auto item) {
 		if (const auto view = viewForItem(item)) {
 			if (const auto media = view->media()) {
 				media->playAnimation();
 			}
 		}
 	}, lifetime());
-	subscribe(Auth().data().queryItemVisibility(), [this](const Data::Session::ItemVisibilityQuery &query) {
-		if (_history != query.item->history() || !query.item->isLogEntry() || !isVisible()) {
+	subscribe(session().data().queryItemVisibility(), [=](
+			const Data::Session::ItemVisibilityQuery &query) {
+		if (_history != query.item->history()
+			|| !query.item->isAdminLogEntry()
+			|| !isVisible()) {
 			return;
 		}
 		if (const auto view = viewForItem(query.item)) {
@@ -275,6 +277,22 @@ InnerWidget::InnerWidget(
 	updateEmptyText();
 
 	requestAdmins();
+}
+
+Main::Session &InnerWidget::session() const {
+	return _controller->session();
+}
+
+rpl::producer<> InnerWidget::showSearchSignal() const {
+	return _showSearchSignal.events();
+}
+
+rpl::producer<int> InnerWidget::scrollToSignal() const {
+	return _scrollToSignal.events();
+}
+
+rpl::producer<> InnerWidget::cancelSignal() const {
+	return _cancelSignal.events();
 }
 
 void InnerWidget::visibleTopBottomUpdated(
@@ -389,7 +407,7 @@ void InnerWidget::requestAdmins() {
 		MTP_int(kMaxChannelAdmins),
 		MTP_int(participantsHash)
 	)).done([this](const MTPchannels_ChannelParticipants &result) {
-		Auth().api().parseChannelParticipants(_channel, result, [&](
+		session().api().parseChannelParticipants(_channel, result, [&](
 				int availableCount,
 				const QVector<MTPChannelParticipant> &list) {
 			auto filtered = (
@@ -407,7 +425,7 @@ void InnerWidget::requestAdmins() {
 				return std::make_pair(userId, canEdit);
 			}) | ranges::view::transform([&](auto &&pair) {
 				return std::make_pair(
-					Auth().data().userLoaded(pair.first),
+					session().data().userLoaded(pair.first),
 					pair.second);
 			}) | ranges::view::filter([&](auto &&pair) {
 				return (pair.first != nullptr);
@@ -421,7 +439,7 @@ void InnerWidget::requestAdmins() {
 			}
 		});
 		if (_admins.empty()) {
-			_admins.push_back(Auth().user());
+			_admins.push_back(session().user());
 		}
 		if (_showFilterCallback) {
 			showFilter(std::move(_showFilterCallback));
@@ -514,7 +532,7 @@ bool InnerWidget::elementUnderCursor(
 void InnerWidget::elementAnimationAutoplayAsync(
 		not_null<const HistoryView::Element*> view) {
 	crl::on_main(this, [this, msgId = view->data()->fullId()] {
-		if (const auto item = Auth().data().message(msgId)) {
+		if (const auto item = session().data().message(msgId)) {
 			if (const auto view = viewForItem(item)) {
 				if (const auto media = view->media()) {
 					media->autoplayAnimation();
@@ -544,6 +562,9 @@ bool InnerWidget::elementIntersectsRange(
 	return (top < till && bottom > from);
 }
 
+void InnerWidget::elementStartStickerLoop(not_null<const Element*> view) {
+}
+
 void InnerWidget::saveState(not_null<SectionMemento*> memento) {
 	memento->setFilter(std::move(_filter));
 	memento->setAdmins(std::move(_admins));
@@ -555,7 +576,6 @@ void InnerWidget::saveState(not_null<SectionMemento*> memento) {
 			base::take(_eventIds),
 			_upLoaded,
 			_downLoaded);
-		memento->setIdManager(base::take(_idManager));
 		base::take(_itemsByData);
 	}
 	_upLoaded = _downLoaded = true; // Don't load or handle anything anymore.
@@ -568,9 +588,6 @@ void InnerWidget::restoreState(not_null<SectionMemento*> memento) {
 		_itemsByData.emplace(item->data(), item.get());
 	}
 	_eventIds = memento->takeEventIds();
-	if (auto manager = memento->takeIdManager()) {
-		_idManager = std::move(manager);
-	}
 	_admins = memento->takeAdmins();
 	_adminsCanEdit = memento->takeAdminsCanEdit();
 	_filter = memento->takeFilter();
@@ -671,7 +688,6 @@ void InnerWidget::addEvents(Direction direction, const QVector<MTPChannelAdminLo
 			GenerateItems(
 				this,
 				_history,
-				_idManager.get(),
 				data,
 				addOne);
 			if (count > 1) {
@@ -761,10 +777,10 @@ int InnerWidget::resizeGetHeight(int newWidth) {
 }
 
 void InnerWidget::restoreScrollPosition() {
-	auto newVisibleTop = _visibleTopItem
+	const auto newVisibleTop = _visibleTopItem
 		? (itemTop(_visibleTopItem) + _visibleTopFromItem)
 		: ScrollMax;
-	scrollToSignal.notify(newVisibleTop, true);
+	_scrollToSignal.fire_copy(newVisibleTop);
 }
 
 void InnerWidget::paintEvent(QPaintEvent *e) {
@@ -876,8 +892,6 @@ void InnerWidget::clearAfterFilterChange() {
 	_items.clear();
 	_eventIds.clear();
 	_itemsByData.clear();
-	_idManager = nullptr;
-	_idManager = _history->adminLogIdManager();
 	updateEmptyText();
 	updateSize();
 }
@@ -917,7 +931,7 @@ TextForMimeData InnerWidget::getSelectedText() const {
 
 void InnerWidget::keyPressEvent(QKeyEvent *e) {
 	if (e->key() == Qt::Key_Escape || e->key() == Qt::Key_Back) {
-		cancelledSignal.notify(true);
+		_cancelSignal.fire({});
 	} else if (e == QKeySequence::Copy && _selectedItem != nullptr) {
 		copySelectedText();
 #ifdef Q_OS_MAC
@@ -1020,15 +1034,15 @@ void InnerWidget::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					cancelContextDownload(document);
 				});
 			} else {
-				if (document->loaded() && document->isGifv()) {
-					if (!cAutoPlayGif()) {
-						const auto itemId = view
-							? view->data()->fullId()
-							: FullMsgId();
-						_menu->addAction(tr::lng_context_open_gif(tr::now), [=] {
-							openContextGif(itemId);
-						});
-					}
+				if (document->loaded()
+					&& document->isGifv()
+					&& !document->session().settings().autoplayGifs()) {
+					const auto itemId = view
+						? view->data()->fullId()
+						: FullMsgId();
+					_menu->addAction(tr::lng_context_open_gif(tr::now), [=] {
+						openContextGif(itemId);
+					});
 				}
 				if (!document->filepath(DocumentData::FilePathResolve::Checked).isEmpty()) {
 					_menu->addAction(Platform::IsMac() ? tr::lng_context_show_in_finder(tr::now) : tr::lng_context_show_in_folder(tr::now), [=] {
@@ -1144,7 +1158,7 @@ void InnerWidget::showContextInFolder(not_null<DocumentData*> document) {
 }
 
 void InnerWidget::openContextGif(FullMsgId itemId) {
-	if (const auto item = Auth().data().message(itemId)) {
+	if (const auto item = session().data().message(itemId)) {
 		if (const auto media = item->media()) {
 			if (const auto document = media->document()) {
 				Core::App().showDocument(document, item);
@@ -1154,7 +1168,7 @@ void InnerWidget::openContextGif(FullMsgId itemId) {
 }
 
 void InnerWidget::copyContextText(FullMsgId itemId) {
-	if (const auto item = Auth().data().message(itemId)) {
+	if (const auto item = session().data().message(itemId)) {
 		SetClipboardText(HistoryItemText(item));
 	}
 }
@@ -1612,7 +1626,7 @@ void InnerWidget::performDrag() {
 	//	if (uponSelected && !Adaptive::OneColumn()) {
 	//		auto selectedState = getSelectionState();
 	//		if (selectedState.count > 0 && selectedState.count == selectedState.canForwardCount) {
-	//			Auth().data().setMimeForwardIds(getSelectedItems());
+	//			session().data().setMimeForwardIds(getSelectedItems());
 	//			mimeData->setData(qsl("application/x-td-forward"), "1");
 	//		}
 	//	}
@@ -1620,14 +1634,14 @@ void InnerWidget::performDrag() {
 	//	return;
 	//} else {
 	//	auto forwardMimeType = QString();
-	//	auto pressedMedia = static_cast<HistoryMedia*>(nullptr);
+	//	auto pressedMedia = static_cast<HistoryView::Media*>(nullptr);
 	//	if (auto pressedItem = App::pressedItem()) {
 	//		pressedMedia = pressedItem->media();
 	//		if (_mouseCursorState == CursorState::Date
 	//			|| (pressedMedia && pressedMedia->dragItem())) {
 	//			forwardMimeType = qsl("application/x-td-forward");
-	//			Auth().data().setMimeForwardIds(
-	//				Auth().data().itemOrItsGroup(pressedItem->data()));
+	//			session().data().setMimeForwardIds(
+	//				session().data().itemOrItsGroup(pressedItem->data()));
 	//		}
 	//	}
 	//	if (auto pressedLnkItem = App::pressedLinkItem()) {
@@ -1635,7 +1649,7 @@ void InnerWidget::performDrag() {
 	//			if (forwardMimeType.isEmpty()
 	//				&& pressedMedia->dragItemByHandler(pressedHandler)) {
 	//				forwardMimeType = qsl("application/x-td-forward");
-	//				Auth().data().setMimeForwardIds(
+	//				session().data().setMimeForwardIds(
 	//					{ 1, pressedLnkItem->fullId() });
 	//			}
 	//		}
