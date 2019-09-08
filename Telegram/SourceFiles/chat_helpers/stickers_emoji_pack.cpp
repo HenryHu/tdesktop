@@ -103,7 +103,7 @@ constexpr auto kClearSourceTimeout = 10 * crl::time(1000);
 		},
 		5,
 	};
-	static const auto list = std::array{
+	static const auto list = std::array<const Lottie::ColorReplacements*, 5>{
 		&color1,
 		&color2,
 		&color3,
