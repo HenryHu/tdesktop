@@ -21,15 +21,29 @@ QString SystemVersionPretty() {
 }
 
 QString SystemCountry() {
-	return QString();
+	return QLocale::system().name().split('_').last();
 }
 
 QString SystemLanguage() {
-	return QString();
+	const auto system = QLocale::system();
+	const auto languages = system.uiLanguages();
+	return languages.isEmpty()
+		? system.name().split('_').first()
+		: languages.front();
 }
 
 QDate WhenSystemBecomesOutdated() {
 	return QDate();
 }
+
+int AutoUpdateVersion() {
+	return 2;
+}
+
+QString AutoUpdateKey() {
+    return "freebsd";
+}
+
+
 
 } // namespace Platform
