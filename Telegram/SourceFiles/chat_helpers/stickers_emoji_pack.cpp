@@ -19,6 +19,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "styles/style_history.h"
 
+#include <QtCore/QBuffer>
+
 namespace Stickers {
 namespace details {
 
@@ -43,7 +45,7 @@ private:
 
 namespace {
 
-constexpr auto kRefreshTimeout = TimeId(7200);
+constexpr auto kRefreshTimeout = 7200 * crl::time(1000);
 constexpr auto kClearSourceTimeout = 10 * crl::time(1000);
 
 [[nodiscard]] QSize SingleSize() {
@@ -317,14 +319,14 @@ EmojiImageLoader::EmojiImageLoader(
 }
 
 QImage EmojiImageLoader::prepare(EmojiPtr emoji) {
-	_images->ensureLoaded();
+	const auto loaded = _images->ensureLoaded();
 	const auto factor = cIntRetinaFactor();
 	const auto side = st::largeEmojiSize + 2 * st::largeEmojiOutline;
 	auto tinted = QImage(
 		QSize(st::largeEmojiSize, st::largeEmojiSize) * factor,
 		QImage::Format_ARGB32_Premultiplied);
 	tinted.fill(Qt::white);
-	{
+	if (loaded) {
 		QPainter p(&tinted);
 		p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
 		_images->draw(
@@ -338,7 +340,7 @@ QImage EmojiImageLoader::prepare(EmojiPtr emoji) {
 		QSize(side, side) * factor,
 		QImage::Format_ARGB32_Premultiplied);
 	result.fill(Qt::transparent);
-	{
+	if (loaded) {
 		QPainter p(&result);
 		const auto delta = st::largeEmojiOutline * factor;
 		const auto planar = std::array<QPoint, 4>{ {
