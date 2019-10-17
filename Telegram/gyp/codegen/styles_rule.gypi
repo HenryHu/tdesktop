@@ -16,7 +16,7 @@
       '<(style_timestamp)',
     ],
     'action': [
-      'python', '<(DEPTH)/update_dependent.py', '--styles',
+      '%%PYTHON_CMD%%', '<(DEPTH)/update_dependent.py', '--styles',
       '-I', '<(res_loc)', '-I', '<(src_loc)',
       '-o', '<(style_timestamp)',
       '<@(style_files)',

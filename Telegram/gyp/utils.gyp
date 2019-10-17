@@ -119,11 +119,11 @@
             ],
           }, {
             'include_dirs': [
-              '/usr/local/include',
+              '%%LOCALBASE%%/include',
               '<(libs_loc)/openssl/include'
             ],
             'library_dirs': [
-              '/usr/local/lib',
+              '%%LOCALBASE%%/lib',
             ],
           }]
         ],
@@ -141,11 +141,11 @@
             ],
           }, {
             'include_dirs': [
-              '/usr/local/include',
+              '%%LOCALBASE%%/include',
               '<(libs_loc)/openssl/include'
             ],
             'library_dirs': [
-              '/usr/local/lib',
+              '%%LOCALBASE%%/lib',
             ],
           }]
         ],
