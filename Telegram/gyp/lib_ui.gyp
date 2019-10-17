@@ -39,7 +39,7 @@
       'dependent_style_files': [
       ],
       'style_timestamp': '<(SHARED_INTERMEDIATE_DIR)/update_dependent_styles_ui.timestamp',
-      'list_sources_command': 'python <(DEPTH)/list_sources.py --input <(DEPTH)/lib_ui/sources.txt --replace src_loc=<(src_loc)',
+      'list_sources_command': '%%PYTHON_CMD%% <(DEPTH)/list_sources.py --input <(DEPTH)/lib_ui/sources.txt --replace src_loc=<(src_loc)',
       'pch_source': '<(src_loc)/ui/ui_pch.cpp',
       'pch_header': '<(src_loc)/ui/ui_pch.h',
     },
@@ -56,7 +56,7 @@
     'include_dirs': [
       '<(src_loc)',
       '<(SHARED_INTERMEDIATE_DIR)',
-      '<(libs_loc)/range-v3/include',
+      '%%LOCALBASE%%/include',
       '<(submodules_loc)/GSL/include',
       '<(submodules_loc)/variant/include',
       '<(submodules_loc)/crl/src',
@@ -68,7 +68,7 @@
       '<(DEPTH)/lib_ui/sources.txt',
     ],
     'sources!': [
-      '<!@(<(list_sources_command) <(qt_moc_list_sources_arg) --exclude_for <(build_os))',
+      '<!@(<(list_sources_command) <(qt_moc_list_sources_arg) --exclude_for linux)',
     ],
   }],
 }

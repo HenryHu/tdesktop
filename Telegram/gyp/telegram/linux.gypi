@@ -20,12 +20,6 @@
       ],
     },
     'libraries': [
-      '-lbreakpad_client',
-      '-lcomposeplatforminputcontextplugin',
-      '-libusplatforminputcontextplugin',
-      '-lfcitxplatforminputcontextplugin',
-      '-lhimeplatforminputcontextplugin',
-      '-lnimfplatforminputcontextplugin',
       '-llzma',
       '-lopenal',
       '-lavformat',
@@ -40,6 +34,7 @@
       '-lvdpau',
       '-ldrm',
       '-lz',
+      '-lminizip',
 #      '<!(pkg-config 2> /dev/null --libs <@(pkgconfig_libs))',
     ],
     'cflags_cc': [
@@ -50,7 +45,6 @@
       '-Wl,-wrap,aligned_alloc',
       '-Wl,-wrap,secure_getenv',
       '-Wl,--no-as-needed,-lrt',
-      '-Wl,-Bstatic',
     ],
     'configurations': {
       'Release': {
