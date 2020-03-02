@@ -21,6 +21,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "boxes/confirm_box.h"
 #include "main/main_session.h"
+#include "main/main_account.h"
+#include "main/main_app_config.h"
 #include "core/application.h"
 #include "mainwindow.h"
 #include "window/window_session_controller.h"
@@ -83,10 +85,12 @@ PeerClickHandler::PeerClickHandler(not_null<PeerData*> peer)
 void PeerClickHandler::onClick(ClickContext context) const {
 	if (context.button == Qt::LeftButton && App::wnd()) {
 		const auto controller = App::wnd()->sessionController();
-		if (_peer
-			&& _peer->isChannel()
-			&& controller->activeChatCurrent().peer() != _peer) {
-			if (!_peer->asChannel()->isPublic() && !_peer->asChannel()->amIn()) {
+		const auto currentPeer = controller->activeChatCurrent().peer();
+		if (_peer && _peer->isChannel() && currentPeer != _peer) {
+			const auto clickedChannel = _peer->asChannel();
+			if (!clickedChannel->isPublic() && !clickedChannel->amIn()
+				&& (!currentPeer->isChannel()
+					|| currentPeer->asChannel()->linkedChat() != clickedChannel)) {
 				Ui::show(Box<InformBox>(_peer->isMegagroup()
 					? tr::lng_group_not_accessible(tr::now)
 					: tr::lng_channel_not_accessible(tr::now)));
@@ -374,6 +378,27 @@ void PeerData::setUserpicChecked(
 		//	}
 		//}
 	}
+}
+
+auto PeerData::unavailableReasons() const
+-> const std::vector<Data::UnavailableReason> & {
+	static const auto result = std::vector<Data::UnavailableReason>();
+	return result;
+}
+
+QString PeerData::computeUnavailableReason() const {
+	const auto &list = unavailableReasons();
+	const auto &config = session().account().appConfig();
+	const auto skip = config.get<std::vector<QString>>(
+		"ignore_restriction_reasons",
+		std::vector<QString>());
+	auto &&filtered = ranges::view::all(
+		list
+	) | ranges::view::filter([&](const Data::UnavailableReason &reason) {
+		return ranges::find(skip, reason.reason) == end(skip);
+	});
+	const auto first = filtered.begin();
+	return (first != filtered.end()) ? first->text : QString();
 }
 
 bool PeerData::canPinMessages() const {
@@ -726,6 +751,17 @@ int PeerData::slowmodeSecondsLeft() const {
 		}
 	}
 	return 0;
+}
+
+bool PeerData::canSendPolls() const {
+	if (const auto user = asUser()) {
+		return user->isBot();
+	} else if (const auto chat = asChat()) {
+		return chat->canSendPolls();
+	} else if (const auto channel = asChannel()) {
+		return channel->canSendPolls();
+	}
+	return false;
 }
 
 namespace Data {

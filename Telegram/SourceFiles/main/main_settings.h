@@ -153,6 +153,9 @@ public:
 		_variables.groupStickersSectionHidden.remove(peerId);
 	}
 
+	void setMediaLastPlaybackPosition(DocumentId id, crl::time time);
+	[[nodiscard]] crl::time mediaLastPlaybackPosition(DocumentId id) const;
+
 	[[nodiscard]] Data::AutoDownload::Full &autoDownload() {
 		return _variables.autoDownload;
 	}
@@ -198,12 +201,6 @@ public:
 	void setExeLaunchWarning(bool warning) {
 		_variables.exeLaunchWarning = warning;
 	}
-	[[nodiscard]] bool autoplayGifs() const {
-		return _variables.autoplayGifs;
-	}
-	void setAutoplayGifs(bool value) {
-		_variables.autoplayGifs = value;
-	}
 	[[nodiscard]] bool loopAnimatedStickers() const {
 		return _variables.loopAnimatedStickers;
 	}
@@ -231,11 +228,40 @@ public:
 		_variables.suggestStickersByEmoji = value;
 	}
 
+	void setSpellcheckerEnabled(bool value) {
+		_variables.spellcheckerEnabled = value;
+	}
+	bool spellcheckerEnabled() const {
+		return _variables.spellcheckerEnabled.current();
+	}
+	rpl::producer<bool> spellcheckerEnabledValue() const {
+		return _variables.spellcheckerEnabled.value();
+	}
+	rpl::producer<bool> spellcheckerEnabledChanges() const {
+		return _variables.spellcheckerEnabled.changes();
+	}
+
+	[[nodiscard]] float64 videoPlaybackSpeed() const {
+		return _variables.videoPlaybackSpeed.current();
+	}
+	void setVideoPlaybackSpeed(float64 speed) {
+		_variables.videoPlaybackSpeed = speed;
+	}
+	[[nodiscard]] QByteArray videoPipGeometry() const {
+		return _variables.videoPipGeometry;
+	}
+	void setVideoPipGeometry(QByteArray geometry) {
+		_variables.videoPipGeometry = geometry;
+	}
+
+	[[nodiscard]] static bool ThirdColumnByDefault();
+
 private:
 	struct Variables {
 		Variables();
 
 		static constexpr auto kDefaultDialogsWidthRatio = 5. / 14;
+		static constexpr auto kDefaultBigDialogsWidthRatio = 0.275;
 		static constexpr auto kDefaultThirdColumnWidth = 0;
 
 		bool lastSeenWarningSeen = false;
@@ -250,8 +276,7 @@ private:
 		bool thirdSectionInfoEnabled = true; // per-window
 		bool smallDialogsList = false; // per-window
 		int thirdSectionExtendedBy = -1; // per-window
-		rpl::variable<float64> dialogsWidthRatio
-			= kDefaultDialogsWidthRatio; // per-window
+		rpl::variable<float64> dialogsWidthRatio; // per-window
 		rpl::variable<int> thirdColumnWidth
 			= kDefaultThirdColumnWidth; // per-window
 		Ui::InputSubmitSettings sendSubmitWay;
@@ -264,12 +289,15 @@ private:
 		rpl::variable<bool> archiveInMainMenu = false;
 		rpl::variable<bool> notifyAboutPinned = true;
 		rpl::variable<bool> skipArchiveInSearch = false;
-		bool autoplayGifs = true;
 		bool loopAnimatedStickers = true;
 		rpl::variable<bool> largeEmoji = true;
 		rpl::variable<bool> replaceEmoji = true;
 		bool suggestEmoji = true;
 		bool suggestStickersByEmoji = true;
+		rpl::variable<bool> spellcheckerEnabled = true;
+		std::vector<std::pair<DocumentId, crl::time>> mediaLastPlaybackPosition;
+		rpl::variable<float64> videoPlaybackSpeed = 1.;
+		QByteArray videoPipGeometry;
 
 		static constexpr auto kDefaultSupportChatsLimitSlice
 			= 7 * 24 * 60 * 60;

@@ -32,6 +32,7 @@ public:
 	virtual void setInnerFocus();
 
 	void showAnimated(const QPixmap &bgAnimCache, bool back = false);
+	void showFinished();
 
 protected:
 	void paintEvent(QPaintEvent *e) override;
@@ -86,7 +87,7 @@ struct TermsLock {
 
 };
 
-class TermsBox : public BoxContent {
+class TermsBox : public Ui::BoxContent {
 public:
 	TermsBox(
 		QWidget*,

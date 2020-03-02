@@ -20,7 +20,19 @@ namespace Platform {
 inline void SetWatchingMediaKeys(bool watching) {
 }
 
+bool InSandbox();
+bool InSnap();
+
+bool IsXDGDesktopPortalPresent();
+
+QString ProcessNameByPID(const QString &pid);
 QString CurrentExecutablePath(int argc, char *argv[]);
+
+QString AppRuntimeDirectory();
+QString SingleInstanceLocalServerName(const QString &hash);
+
+QString GetLauncherBasename();
+QString GetLauncherFilename();
 
 inline std::optional<crl::time> LastUserInputTime() {
 	return std::nullopt;
@@ -31,11 +43,8 @@ inline void IgnoreApplicationActivationRightNow() {
 
 } // namespace Platform
 
-inline QString psServerPrefix() {
-    return qsl("/tmp/");
-}
 inline void psCheckLocalSocket(const QString &serverName) {
-    QFile address(serverName);
+	QFile address(serverName);
 	if (address.exists()) {
 		address.remove();
 	}

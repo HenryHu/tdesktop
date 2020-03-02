@@ -58,9 +58,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #endif
 
 #ifndef WM_NCPOINTERUPDATE
-#define WM_NCPOINTERUPDATE              0x0241
-#define WM_NCPOINTERDOWN                0x0242
-#define WM_NCPOINTERUP                  0x0243
+#define WM_NCPOINTERUPDATE 0x0241
+#define WM_NCPOINTERDOWN 0x0242
+#define WM_NCPOINTERUP 0x0243
 #endif
 
 using namespace Microsoft::WRL;
@@ -70,22 +70,23 @@ using namespace Windows::Foundation;
 using namespace Platform;
 
 namespace {
-    QStringList _initLogs;
 
-	bool themeInited = false;
-	bool finished = true;
-	QMargins simpleMargins, margins;
-	HICON bigIcon = 0, smallIcon = 0, overlayIcon = 0;
+QStringList _initLogs;
 
-	class _PsInitializer {
-	public:
-		_PsInitializer() {
-			Dlls::start();
-		}
-	};
-	_PsInitializer _psInitializer;
+bool themeInited = false;
+bool finished = true;
+QMargins simpleMargins, margins;
+HICON bigIcon = 0, smallIcon = 0, overlayIcon = 0;
 
+class _PsInitializer {
+public:
+	_PsInitializer() {
+		Dlls::start();
+	}
 };
+_PsInitializer _psInitializer;
+
+} // namespace
 
 void psDeleteDir(const QString &dir) {
 	std::wstring wDir = QDir::toNativeSeparators(dir).toStdWString();
@@ -131,11 +132,11 @@ namespace {
 }
 
 QStringList psInitLogs() {
-    return _initLogs;
+	return _initLogs;
 }
 
 void psClearInitLogs() {
-    _initLogs = QStringList();
+	_initLogs = QStringList();
 }
 
 void psActivateProcess(uint64 pid) {
@@ -152,7 +153,7 @@ QString psAppDataPath() {
 #ifdef OS_WIN_STORE
 		return appData.absolutePath() + qsl("/Telegram Desktop UWP/");
 #else // OS_WIN_STORE
-		return appData.absolutePath() + '/' + str_const_toString(AppName) + '/';
+		return appData.absolutePath() + '/' + AppName.utf16() + '/';
 #endif // OS_WIN_STORE
 	}
 	return QString();
@@ -163,7 +164,7 @@ QString psAppDataPathOld() {
 	WCHAR wstrPath[maxFileLen];
 	if (GetEnvironmentVariable(L"APPDATA", wstrPath, maxFileLen)) {
 		QDir appData(QString::fromStdWString(std::wstring(wstrPath)));
-		return appData.absolutePath() + '/' + str_const_toString(AppNameOld) + '/';
+		return appData.absolutePath() + '/' + AppNameOld.utf16() + '/';
 	}
 	return QString();
 }
@@ -216,24 +217,28 @@ int psCleanup() {
 void psDoFixPrevious() {
 	try {
 		static const int bufSize = 4096;
-		DWORD checkType, checkSize = bufSize * 2;
-		WCHAR checkStr[bufSize];
+		DWORD checkType = 0;
+		DWORD checkSize = bufSize * 2;
+		WCHAR checkStr[bufSize] = { 0 };
+		HKEY newKey1 = nullptr;
+		HKEY newKey2 = nullptr;
+		HKEY oldKey1 = nullptr;
+		HKEY oldKey2 = nullptr;
 
-		QString appId = str_const_toString(AppId);
-		QString newKeyStr1 = QString("Software\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\%1_is1").arg(appId);
-		QString newKeyStr2 = QString("Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\%1_is1").arg(appId);
-		QString oldKeyStr1 = QString("SOFTWARE\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\%1_is1").arg(appId);
-		QString oldKeyStr2 = QString("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\%1_is1").arg(appId);
-		HKEY newKey1, newKey2, oldKey1, oldKey2;
-		LSTATUS newKeyRes1 = RegOpenKeyEx(HKEY_CURRENT_USER, newKeyStr1.toStdWString().c_str(), 0, KEY_READ, &newKey1);
-		LSTATUS newKeyRes2 = RegOpenKeyEx(HKEY_CURRENT_USER, newKeyStr2.toStdWString().c_str(), 0, KEY_READ, &newKey2);
-		LSTATUS oldKeyRes1 = RegOpenKeyEx(HKEY_LOCAL_MACHINE, oldKeyStr1.toStdWString().c_str(), 0, KEY_READ, &oldKey1);
-		LSTATUS oldKeyRes2 = RegOpenKeyEx(HKEY_LOCAL_MACHINE, oldKeyStr2.toStdWString().c_str(), 0, KEY_READ, &oldKey2);
+		const auto appId = AppId.utf16();
+		const auto newKeyStr1 = QString("Software\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\%1_is1").arg(appId).toStdWString();
+		const auto newKeyStr2 = QString("Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\%1_is1").arg(appId).toStdWString();
+		const auto oldKeyStr1 = QString("SOFTWARE\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\%1_is1").arg(appId).toStdWString();
+		const auto oldKeyStr2 = QString("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\%1_is1").arg(appId).toStdWString();
+		const auto newKeyRes1 = RegOpenKeyEx(HKEY_CURRENT_USER, newKeyStr1.c_str(), 0, KEY_READ, &newKey1);
+		const auto newKeyRes2 = RegOpenKeyEx(HKEY_CURRENT_USER, newKeyStr2.c_str(), 0, KEY_READ, &newKey2);
+		const auto oldKeyRes1 = RegOpenKeyEx(HKEY_LOCAL_MACHINE, oldKeyStr1.c_str(), 0, KEY_READ, &oldKey1);
+		const auto oldKeyRes2 = RegOpenKeyEx(HKEY_LOCAL_MACHINE, oldKeyStr2.c_str(), 0, KEY_READ, &oldKey2);
 
-		bool existNew1 = (newKeyRes1 == ERROR_SUCCESS) && (RegQueryValueEx(newKey1, L"InstallDate", 0, &checkType, (BYTE*)checkStr, &checkSize) == ERROR_SUCCESS); checkSize = bufSize * 2;
-		bool existNew2 = (newKeyRes2 == ERROR_SUCCESS) && (RegQueryValueEx(newKey2, L"InstallDate", 0, &checkType, (BYTE*)checkStr, &checkSize) == ERROR_SUCCESS); checkSize = bufSize * 2;
-		bool existOld1 = (oldKeyRes1 == ERROR_SUCCESS) && (RegQueryValueEx(oldKey1, L"InstallDate", 0, &checkType, (BYTE*)checkStr, &checkSize) == ERROR_SUCCESS); checkSize = bufSize * 2;
-		bool existOld2 = (oldKeyRes2 == ERROR_SUCCESS) && (RegQueryValueEx(oldKey2, L"InstallDate", 0, &checkType, (BYTE*)checkStr, &checkSize) == ERROR_SUCCESS); checkSize = bufSize * 2;
+		const auto existNew1 = (newKeyRes1 == ERROR_SUCCESS) && (RegQueryValueEx(newKey1, L"InstallDate", 0, &checkType, (BYTE*)checkStr, &checkSize) == ERROR_SUCCESS); checkSize = bufSize * 2;
+		const auto existNew2 = (newKeyRes2 == ERROR_SUCCESS) && (RegQueryValueEx(newKey2, L"InstallDate", 0, &checkType, (BYTE*)checkStr, &checkSize) == ERROR_SUCCESS); checkSize = bufSize * 2;
+		const auto existOld1 = (oldKeyRes1 == ERROR_SUCCESS) && (RegQueryValueEx(oldKey1, L"InstallDate", 0, &checkType, (BYTE*)checkStr, &checkSize) == ERROR_SUCCESS); checkSize = bufSize * 2;
+		const auto existOld2 = (oldKeyRes2 == ERROR_SUCCESS) && (RegQueryValueEx(oldKey2, L"InstallDate", 0, &checkType, (BYTE*)checkStr, &checkSize) == ERROR_SUCCESS); checkSize = bufSize * 2;
 
 		if (newKeyRes1 == ERROR_SUCCESS) RegCloseKey(newKey1);
 		if (newKeyRes2 == ERROR_SUCCESS) RegCloseKey(newKey2);
@@ -241,8 +246,8 @@ void psDoFixPrevious() {
 		if (oldKeyRes2 == ERROR_SUCCESS) RegCloseKey(oldKey2);
 
 		if (existNew1 || existNew2) {
-			oldKeyRes1 = existOld1 ? RegDeleteKey(HKEY_LOCAL_MACHINE, oldKeyStr1.toStdWString().c_str()) : ERROR_SUCCESS;
-			oldKeyRes2 = existOld2 ? RegDeleteKey(HKEY_LOCAL_MACHINE, oldKeyStr2.toStdWString().c_str()) : ERROR_SUCCESS;
+			const auto deleteKeyRes1 = existOld1 ? RegDeleteKey(HKEY_LOCAL_MACHINE, oldKeyStr1.c_str()) : ERROR_SUCCESS;
+			const auto deleteKeyRes2 = existOld2 ? RegDeleteKey(HKEY_LOCAL_MACHINE, oldKeyStr2.c_str()) : ERROR_SUCCESS;
 		}
 
 		QString userDesktopLnk, commonDesktopLnk;
@@ -322,6 +327,10 @@ QString CurrentExecutablePath(int argc, char *argv[]) {
 		return info.absoluteFilePath();
 	}
 	return QString();
+}
+
+QString SingleInstanceLocalServerName(const QString &hash) {
+	return qsl("Global\\") + hash + '-' + cGUIDStr();
 }
 
 std::optional<crl::time> LastUserInputTime() {
@@ -510,7 +519,7 @@ void _manageAppLnk(bool create, bool silent, int path_csidl, const wchar_t *args
 	WCHAR startupFolder[MAX_PATH];
 	HRESULT hr = SHGetFolderPath(0, path_csidl, 0, SHGFP_TYPE_CURRENT, startupFolder);
 	if (SUCCEEDED(hr)) {
-		QString lnk = QString::fromWCharArray(startupFolder) + '\\' + str_const_toString(AppFile) + qsl(".lnk");
+		QString lnk = QString::fromWCharArray(startupFolder) + '\\' + AppFile.utf16() + qsl(".lnk");
 		if (create) {
 			ComPtr<IShellLink> shellLink;
 			hr = CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&shellLink));
@@ -563,7 +572,7 @@ void psSendToMenu(bool send, bool silent) {
 }
 
 void psWriteDump() {
-#ifndef TDESKTOP_DISABLE_CRASH_REPORTS
+#ifndef DESKTOP_APP_DISABLE_CRASH_REPORTS
 	PROCESS_MEMORY_COUNTERS data = { 0 };
 	if (Dlls::GetProcessMemoryInfo
 		&& Dlls::GetProcessMemoryInfo(
@@ -584,7 +593,7 @@ void psWriteDump() {
 			<< (data.PagefileUsage / mb)
 			<< " MB (current)\n";
 	}
-#endif // TDESKTOP_DISABLE_CRASH_REPORTS
+#endif // DESKTOP_APP_DISABLE_CRASH_REPORTS
 }
 
 bool psLaunchMaps(const Data::LocationPoint &point) {

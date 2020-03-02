@@ -25,12 +25,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace base {
 
-template <typename T>
-using set_of_unique_ptr = std::set<std::unique_ptr<T>, base::pointer_comparator<T>>;
-
-template <typename T>
-using set_of_shared_ptr = std::set<std::shared_ptr<T>, base::pointer_comparator<T>>;
-
 template <typename Value, typename From, typename Till>
 inline bool in_range(Value &&value, From &&from, Till &&till) {
 	return (value >= from) && (value < till);
@@ -52,43 +46,6 @@ T *SharedMemoryLocation() {
 	static_assert(N < 4, "Only 4 shared memory locations!");
 	return reinterpret_cast<T*>(_SharedMemoryLocation + N);
 }
-
-// see https://github.com/boostcon/cppnow_presentations_2012/blob/master/wed/schurr_cpp11_tools_for_class_authors.pdf
-class str_const { // constexpr string
-public:
-	constexpr str_const(const char *str, std::size_t size)
-	: _str(str)
-	, _size(size) {
-	}
-	template <std::size_t N>
-	constexpr str_const(const char(&a)[N]) : str_const(a, N - 1) {
-	}
-	constexpr char operator[](std::size_t n) const {
-		return (n < _size) ? _str[n] :
-#ifndef OS_MAC_OLD
-			throw std::out_of_range("");
-#else // OS_MAC_OLD
-			throw std::exception();
-#endif // OS_MAC_OLD
-	}
-	constexpr std::size_t size() const { return _size; }
-	constexpr const char *c_str() const { return _str; }
-
-private:
-	const char* const _str;
-	const std::size_t _size;
-
-};
-
-inline QString str_const_toString(const str_const &str) {
-	return QString::fromUtf8(str.c_str(), str.size());
-}
-
-inline QByteArray str_const_toByteArray(const str_const &str) {
-	return QByteArray::fromRawData(str.c_str(), str.size());
-}
-
-int GetNextRequestId();
 
 inline void mylocaltime(struct tm * _Tm, const time_t * _Time) {
 #ifdef Q_OS_WIN
@@ -167,37 +124,6 @@ T rand_value() {
 	return result;
 }
 
-class ReadLockerAttempt {
-public:
-	ReadLockerAttempt(not_null<QReadWriteLock*> lock) : _lock(lock), _locked(_lock->tryLockForRead()) {
-	}
-	ReadLockerAttempt(const ReadLockerAttempt &other) = delete;
-	ReadLockerAttempt &operator=(const ReadLockerAttempt &other) = delete;
-	ReadLockerAttempt(ReadLockerAttempt &&other) : _lock(other._lock), _locked(base::take(other._locked)) {
-	}
-	ReadLockerAttempt &operator=(ReadLockerAttempt &&other) {
-		_lock = other._lock;
-		_locked = base::take(other._locked);
-		return *this;
-	}
-	~ReadLockerAttempt() {
-		if (_locked) {
-			_lock->unlock();
-		}
-	}
-
-	operator bool() const {
-		return _locked;
-	}
-
-private:
-	not_null<QReadWriteLock*> _lock;
-	bool _locked = false;
-
-};
-
-static const QRegularExpression::PatternOptions reMultiline(QRegularExpression::DotMatchesEverythingOption | QRegularExpression::MultilineOption);
-
 template <typename T>
 inline T snap(const T &v, const T &_min, const T &_max) {
 	return (v < _min) ? _min : ((v > _max) ? _max : v);
@@ -217,50 +143,6 @@ enum DBIWorkMode {
 	dbiwmTrayOnly = 1,
 	dbiwmWindowOnly = 2,
 };
-
-struct ProxyData {
-	enum class Settings {
-		System,
-		Enabled,
-		Disabled,
-	};
-	enum class Type {
-		None,
-		Socks5,
-		Http,
-		Mtproto,
-	};
-	enum class Status {
-		Valid,
-		Unsupported,
-		Invalid,
-	};
-
-	Type type = Type::None;
-	QString host;
-	uint32 port = 0;
-	QString user, password;
-
-	std::vector<QString> resolvedIPs;
-	crl::time resolvedExpireAt = 0;
-
-	[[nodiscard]] bool valid() const;
-	[[nodiscard]] Status status() const;
-	[[nodiscard]] bool supportsCalls() const;
-	[[nodiscard]] bool tryCustomResolve() const;
-	[[nodiscard]] bytes::vector secretFromMtprotoPassword() const;
-	[[nodiscard]] explicit operator bool() const;
-	[[nodiscard]] bool operator==(const ProxyData &other) const;
-	[[nodiscard]] bool operator!=(const ProxyData &other) const;
-
-	[[nodiscard]] static bool ValidMtprotoPassword(const QString &password);
-	[[nodiscard]] static Status MtprotoPasswordStatus(
-		const QString &password);
-
-};
-
-ProxyData ToDirectIpProxy(const ProxyData &proxy, int ipIndex = 0);
-QNetworkProxy ToNetworkProxy(const ProxyData &proxy);
 
 static const int MatrixRowShift = 40000;
 

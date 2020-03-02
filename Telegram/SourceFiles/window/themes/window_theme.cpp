@@ -37,7 +37,7 @@ namespace {
 
 constexpr auto kThemeFileSizeLimit = 5 * 1024 * 1024;
 constexpr auto kBackgroundSizeLimit = 25 * 1024 * 1024;
-constexpr auto kNightThemeFile = str_const(":/gui/night.tdesktop-theme");
+constexpr auto kNightThemeFile = ":/gui/night.tdesktop-theme"_cs;
 constexpr auto kMinimumTiledSize = 512;
 
 struct Applying {
@@ -593,6 +593,9 @@ void ChatBackground::checkUploadWallPaper() {
 				_session->data().documentConvert(
 					_session->data().document(documentId),
 					data.vdocument());
+			}, [&](const MTPDwallPaperNoFile &data) {
+				LOG(("API Error: "
+					"Got wallPaperNoFile after account.UploadWallPaper."));
 			});
 			if (const auto paper = Data::WallPaper::Create(result)) {
 				setPaper(*paper);
@@ -1251,7 +1254,7 @@ void Revert() {
 }
 
 QString NightThemePath() {
-	return str_const_toString(kNightThemeFile);
+	return kNightThemeFile.utf16();
 }
 
 bool IsNonDefaultBackground() {

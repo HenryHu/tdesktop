@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_drafts.h"
 #include "data/data_user.h"
 #include "boxes/send_files_box.h"
+#include "base/platform/base_platform_info.h"
 #include "ui/widgets/input_fields.h"
 #include "ui/emoji_config.h"
 #include "export/export_settings.h"
@@ -42,6 +43,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QBuffer>
 #include <QtCore/QtEndian>
 #include <QtCore/QDirIterator>
+
+#ifndef Q_OS_WIN
+#include <unistd.h>
+#endif // Q_OS_WIN
 
 extern "C" {
 #include <openssl/evp.h>
@@ -249,28 +254,28 @@ struct FileWriteDescriptor {
 		}
 
 		// detect order of read attempts and file version
-		QString toTry[2];
-		toTry[0] = ((options & FileOption::User) ? _userBasePath : _basePath) + name + '0';
+		QString toWrite[2];
+		toWrite[0] = ((options & FileOption::User) ? _userBasePath : _basePath) + name + '0';
 		if (options & FileOption::Safe) {
-			toTry[1] = ((options & FileOption::User) ? _userBasePath : _basePath) + name + '1';
-			QFileInfo toTry0(toTry[0]);
-			QFileInfo toTry1(toTry[1]);
-			if (toTry0.exists()) {
-				if (toTry1.exists()) {
-					QDateTime mod0 = toTry0.lastModified(), mod1 = toTry1.lastModified();
+			toWrite[1] = ((options & FileOption::User) ? _userBasePath : _basePath) + name + '1';
+			QFileInfo toWrite0(toWrite[0]);
+			QFileInfo toWrite1(toWrite[1]);
+			if (toWrite0.exists()) {
+				if (toWrite1.exists()) {
+					QDateTime mod0 = toWrite0.lastModified(), mod1 = toWrite1.lastModified();
 					if (mod0 > mod1) {
-						qSwap(toTry[0], toTry[1]);
+						qSwap(toWrite[0], toWrite[1]);
 					}
 				} else {
-					qSwap(toTry[0], toTry[1]);
+					qSwap(toWrite[0], toWrite[1]);
 				}
-				toDelete = toTry[1];
-			} else if (toTry1.exists()) {
-				toDelete = toTry[1];
+				toDelete = toWrite[1];
+			} else if (toWrite1.exists()) {
+				toDelete = toWrite[1];
 			}
 		}
 
-		file.setFileName(toTry[0]);
+		file.setFileName(toWrite[0]);
 		if (file.open(QIODevice::WriteOnly)) {
 			file.write(tdfMagic, tdfMagicLen);
 			qint32 version = AppVersion;
@@ -325,6 +330,10 @@ struct FileWriteDescriptor {
 		md5.feed(&version, sizeof(version));
 		md5.feed(tdfMagic, tdfMagicLen);
 		file.write((const char*)md5.result(), 0x10);
+		file.flush();
+#ifndef Q_OS_WIN
+		fsync(file.handle());
+#endif // Q_OS_WIN
 		file.close();
 
 		if (!toDelete.isEmpty()) {
@@ -1117,8 +1126,8 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 		};
 		set(Type::Photo, photo);
 		set(Type::VoiceMessage, audio);
-		set(Type::GIF, gif);
-		set(Type::VideoMessage, gif);
+		set(Type::AutoPlayGIF, gif);
+		set(Type::AutoPlayVideoMessage, gif);
 	} break;
 
 	case dbiAutoPlayOld: {
@@ -1126,7 +1135,25 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 		stream >> gif;
 		if (!_checkStreamStatus(stream)) return false;
 
-		GetStoredSessionSettings().setAutoplayGifs(gif == 1);
+		if (!gif) {
+			using namespace Data::AutoDownload;
+			auto &settings = GetStoredSessionSettings().autoDownload();
+			const auto types = {
+				Type::AutoPlayGIF,
+				Type::AutoPlayVideo,
+				Type::AutoPlayVideoMessage,
+			};
+			const auto sources = {
+				Source::User,
+				Source::Group,
+				Source::Channel
+			};
+			for (const auto source : sources) {
+				for (const auto type : types) {
+					settings.setBytesLimit(source, type, 0);
+				}
+			}
+		}
 	} break;
 
 	case dbiDialogsMode: {
@@ -1264,7 +1291,7 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 		stream >> v;
 		if (!_checkStreamStatus(stream)) return false;
 
-		ProxyData proxy;
+		MTP::ProxyData proxy;
 		switch (v) {
 		case dbictHttpProxy:
 		case dbictTcpProxy: {
@@ -1274,14 +1301,14 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 
 			proxy.port = uint32(port);
 			proxy.type = (v == dbictTcpProxy)
-				? ProxyData::Type::Socks5
-				: ProxyData::Type::Http;
+				? MTP::ProxyData::Type::Socks5
+				: MTP::ProxyData::Type::Http;
 		} break;
 		};
-		Global::SetSelectedProxy(proxy ? proxy : ProxyData());
+		Global::SetSelectedProxy(proxy ? proxy : MTP::ProxyData());
 		Global::SetProxySettings(proxy
-			? ProxyData::Settings::Enabled
-			: ProxyData::Settings::System);
+			? MTP::ProxyData::Settings::Enabled
+			: MTP::ProxyData::Settings::System);
 		if (proxy) {
 			Global::SetProxiesList({ 1, proxy });
 		} else {
@@ -1299,20 +1326,20 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 
 		const auto readProxy = [&] {
 			qint32 proxyType, port;
-			ProxyData proxy;
+			MTP::ProxyData proxy;
 			stream >> proxyType >> proxy.host >> port >> proxy.user >> proxy.password;
 			proxy.port = port;
 			proxy.type = (proxyType == dbictTcpProxy)
-				? ProxyData::Type::Socks5
+				? MTP::ProxyData::Type::Socks5
 				: (proxyType == dbictHttpProxy)
-				? ProxyData::Type::Http
-				: (proxyType == kProxyTypeShift + int(ProxyData::Type::Socks5))
-				? ProxyData::Type::Socks5
-				: (proxyType == kProxyTypeShift + int(ProxyData::Type::Http))
-				? ProxyData::Type::Http
-				: (proxyType == kProxyTypeShift + int(ProxyData::Type::Mtproto))
-				? ProxyData::Type::Mtproto
-				: ProxyData::Type::None;
+				? MTP::ProxyData::Type::Http
+				: (proxyType == kProxyTypeShift + int(MTP::ProxyData::Type::Socks5))
+				? MTP::ProxyData::Type::Socks5
+				: (proxyType == kProxyTypeShift + int(MTP::ProxyData::Type::Http))
+				? MTP::ProxyData::Type::Http
+				: (proxyType == kProxyTypeShift + int(MTP::ProxyData::Type::Mtproto))
+				? MTP::ProxyData::Type::Mtproto
+				: MTP::ProxyData::Type::None;
 			return proxy;
 		};
 		if (connectionType == dbictProxiesListOld
@@ -1327,7 +1354,7 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 				index -= (index > 0 ? count : -count);
 			}
 
-			auto list = std::vector<ProxyData>();
+			auto list = std::vector<MTP::ProxyData>();
 			for (auto i = 0; i < count; ++i) {
 				const auto proxy = readProxy();
 				if (proxy) {
@@ -1345,29 +1372,29 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 			if (connectionType == dbictProxiesListOld) {
 				settings = static_cast<qint32>(
 					(index > 0 && index <= list.size()
-						? ProxyData::Settings::Enabled
-						: ProxyData::Settings::System));
+						? MTP::ProxyData::Settings::Enabled
+						: MTP::ProxyData::Settings::System));
 				index = std::abs(index);
 			}
 			if (index > 0 && index <= list.size()) {
 				Global::SetSelectedProxy(list[index - 1]);
 			} else {
-				Global::SetSelectedProxy(ProxyData());
+				Global::SetSelectedProxy(MTP::ProxyData());
 			}
 
-			const auto unchecked = static_cast<ProxyData::Settings>(settings);
+			const auto unchecked = static_cast<MTP::ProxyData::Settings>(settings);
 			switch (unchecked) {
-			case ProxyData::Settings::Enabled:
+			case MTP::ProxyData::Settings::Enabled:
 				Global::SetProxySettings(Global::SelectedProxy()
-					? ProxyData::Settings::Enabled
-					: ProxyData::Settings::System);
+					? MTP::ProxyData::Settings::Enabled
+					: MTP::ProxyData::Settings::System);
 				break;
-			case ProxyData::Settings::Disabled:
-			case ProxyData::Settings::System:
+			case MTP::ProxyData::Settings::Disabled:
+			case MTP::ProxyData::Settings::System:
 				Global::SetProxySettings(unchecked);
 				break;
 			default:
-				Global::SetProxySettings(ProxyData::Settings::System);
+				Global::SetProxySettings(MTP::ProxyData::Settings::System);
 				break;
 			}
 			Global::SetUseProxyForCalls(calls == 1);
@@ -1381,14 +1408,14 @@ bool _readSetting(quint32 blockId, QDataStream &stream, int version, ReadSetting
 				Global::SetSelectedProxy(proxy);
 				if (connectionType == dbictTcpProxy
 					|| connectionType == dbictHttpProxy) {
-					Global::SetProxySettings(ProxyData::Settings::Enabled);
+					Global::SetProxySettings(MTP::ProxyData::Settings::Enabled);
 				} else {
-					Global::SetProxySettings(ProxyData::Settings::System);
+					Global::SetProxySettings(MTP::ProxyData::Settings::System);
 				}
 			} else {
 				Global::SetProxiesList({});
-				Global::SetSelectedProxy(ProxyData());
-				Global::SetProxySettings(ProxyData::Settings::System);
+				Global::SetSelectedProxy(MTP::ProxyData());
+				Global::SetProxySettings(MTP::ProxyData::Settings::System);
 			}
 		}
 		Core::App().refreshGlobalProxy();
@@ -2031,7 +2058,10 @@ bool _readOldMtpData(bool remove, ReadSettingsContext &context) {
 }
 
 void _writeUserSettings() {
-	if (_readingUserSettings) {
+	if (!_userWorking()) {
+		LOG(("App Error: attempt to write user settings too early!"));
+		return;
+	} else if (_readingUserSettings) {
 		LOG(("App Error: attempt to write settings while reading them!"));
 		return;
 	}
@@ -2555,6 +2585,7 @@ void finish() {
 }
 
 void InitialLoadTheme();
+bool ApplyDefaultNightMode();
 void readLangPack();
 
 void start() {
@@ -2574,7 +2605,10 @@ void start() {
 		_readOldMtpData(false, context); // needed further in _readMtpData
 		applyReadContext(std::move(context));
 
-		return writeSettings();
+		if (!ApplyDefaultNightMode()) {
+			writeSettings();
+		}
+		return;
 	}
 	LOG(("App Info: reading settings..."));
 
@@ -2646,7 +2680,7 @@ void writeSettings() {
 	auto &proxies = Global::RefProxiesList();
 	const auto &proxy = Global::SelectedProxy();
 	auto proxyIt = ranges::find(proxies, proxy);
-	if (proxy.type != ProxyData::Type::None
+	if (proxy.type != MTP::ProxyData::Type::None
 		&& proxyIt == end(proxies)) {
 		proxies.push_back(proxy);
 		proxyIt = end(proxies) - 1;
@@ -4352,6 +4386,20 @@ void InitialLoadTheme() {
 	} else {
 		clearTheme();
 	}
+}
+
+bool ApplyDefaultNightMode() {
+	const auto NightByDefault = Platform::IsMacStoreBuild();
+	if (!NightByDefault
+		|| Window::Theme::IsNightMode()
+		|| _themeKeyDay
+		|| _themeKeyNight
+		|| _themeKeyLegacy) {
+		return false;
+	}
+	Window::Theme::ToggleNightMode();
+	Window::Theme::KeepApplied();
+	return true;
 }
 
 Window::Theme::Saved readThemeAfterSwitch() {

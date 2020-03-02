@@ -10,14 +10,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_document.h"
 #include "data/data_session.h"
 #include "dialogs/dialogs_layout.h"
-#include "styles/style_dialogs.h"
-#include "styles/style_window.h"
-#include "styles/style_boxes.h"
 #include "history/history.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/shadow.h"
 #include "ui/widgets/tooltip.h"
+#include "ui/layers/layer_widget.h"
 #include "ui/emoji_config.h"
 #include "ui/ui_utility.h"
 #include "lang/lang_cloud_manager.h"
@@ -27,7 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/sandbox.h"
 #include "core/application.h"
 #include "main/main_session.h"
-#include "intro/introwidget.h"
+#include "intro/intro_widget.h"
 #include "main/main_account.h" // Account::sessionValue.
 #include "mainwidget.h"
 #include "boxes/confirm_box.h"
@@ -38,8 +36,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "settings/settings_intro.h"
 #include "platform/platform_notifications_manager.h"
-#include "platform/platform_info.h"
-#include "window/layer_widget.h"
+#include "base/platform/base_platform_info.h"
+#include "base/call_delayed.h"
 #include "window/notifications_manager.h"
 #include "window/themes/window_theme.h"
 #include "window/themes/window_theme_warning.h"
@@ -50,6 +48,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_media_preview.h"
 #include "facades.h"
 #include "app.h"
+#include "styles/style_dialogs.h"
+#include "styles/style_layers.h"
+#include "styles/style_window.h"
 
 #include <QtGui/QWindow>
 #include <QtCore/QCoreApplication>
@@ -129,7 +130,7 @@ void MainWindow::initHook() {
 		Qt::QueuedConnection);
 }
 
-void MainWindow::firstShow() {
+void MainWindow::createTrayIconMenu() {
 #ifdef Q_OS_WIN
 	trayIconMenu = new Ui::PopupMenu(nullptr);
 	trayIconMenu->deleteOnHide(false);
@@ -143,17 +144,52 @@ void MainWindow::firstShow() {
 
 	if (Platform::IsLinux()) {
 		trayIconMenu->addAction(tr::lng_open_from_tray(tr::now), this, SLOT(showFromTray()));
-		trayIconMenu->addAction(tr::lng_minimize_to_tray(tr::now), this, SLOT(minimizeToTray()));
-		trayIconMenu->addAction(notificationActionText, this, SLOT(toggleDisplayNotifyFromTray()));
-		trayIconMenu->addAction(tr::lng_quit_from_tray(tr::now), this, SLOT(quitFromTray()));
-	} else {
-		trayIconMenu->addAction(tr::lng_minimize_to_tray(tr::now), this, SLOT(minimizeToTray()));
-		trayIconMenu->addAction(notificationActionText, this, SLOT(toggleDisplayNotifyFromTray()));
-		trayIconMenu->addAction(tr::lng_quit_from_tray(tr::now), this, SLOT(quitFromTray()));
 	}
+	trayIconMenu->addAction(tr::lng_minimize_to_tray(tr::now), this, SLOT(minimizeToTray()));
+	trayIconMenu->addAction(notificationActionText, this, SLOT(toggleDisplayNotifyFromTray()));
+	trayIconMenu->addAction(tr::lng_quit_from_tray(tr::now), this, SLOT(quitFromTray()));
+
+	initTrayMenuHook();
+}
+
+void MainWindow::applyInitialWorkMode() {
 	Global::RefWorkMode().setForced(Global::WorkMode().value(), true);
 
-	psFirstShow();
+	if (cWindowPos().maximized) {
+		DEBUG_LOG(("Window Pos: First show, setting maximized."));
+		setWindowState(Qt::WindowMaximized);
+	}
+	if (cStartInTray()
+		|| (cLaunchMode() == LaunchModeAutoStart
+			&& cStartMinimized()
+			&& !Core::App().passcodeLocked())) {
+		const auto minimizeAndHide = [=] {
+			DEBUG_LOG(("Window Pos: First show, setting minimized after."));
+			setWindowState(windowState() | Qt::WindowMinimized);
+			if (Global::WorkMode().value() == dbiwmTrayOnly
+				|| Global::WorkMode().value() == dbiwmWindowAndTray) {
+				hide();
+			}
+		};
+
+		if (Platform::IsLinux()) {
+			// If I call hide() synchronously here after show() then on Ubuntu 14.04
+			// it will show a window frame with transparent window body, without content.
+			// And to be able to "Show from tray" one more hide() will be required.
+			crl::on_main(this, minimizeAndHide);
+		} else {
+			minimizeAndHide();
+		}
+	}
+	setPositionInited();
+}
+
+void MainWindow::finishFirstShow() {
+	createTrayIconMenu();
+	initShadows();
+	applyInitialWorkMode();
+	createGlobalMenu();
+	firstShadowsUpdate();
 	updateTrayMenu();
 
 	windowDeactivateEvents(
@@ -197,6 +233,7 @@ void MainWindow::setupPasscodeLock() {
 	if (animated) {
 		_passcodeLock->showAnimated(bg);
 	} else {
+		_passcodeLock->showFinished();
 		setInnerFocus();
 	}
 }
@@ -274,7 +311,7 @@ void MainWindow::showSettings() {
 }
 
 void MainWindow::showSpecialLayer(
-		object_ptr<Window::LayerWidget> layer,
+		object_ptr<Ui::LayerWidget> layer,
 		anim::type animated) {
 	if (_passcodeLock) {
 		return;
@@ -303,14 +340,16 @@ void MainWindow::showMainMenu() {
 	if (isHidden()) showFromTray();
 
 	ensureLayerCreated();
-	_layer->showMainMenu(sessionController(), anim::type::normal);
+	_layer->showMainMenu(
+		object_ptr<Window::MainMenu>(this, sessionController()),
+		anim::type::normal);
 }
 
 void MainWindow::ensureLayerCreated() {
 	if (_layer) {
 		return;
 	}
-	_layer = base::make_unique_q<Window::LayerStackWidget>(
+	_layer = base::make_unique_q<Ui::LayerStackWidget>(
 		bodyWidget());
 
 	_layer->hideFinishEvents(
@@ -367,8 +406,8 @@ MainWidget *MainWindow::mainWidget() {
 }
 
 void MainWindow::ui_showBox(
-		object_ptr<BoxContent> box,
-		LayerOptions options,
+		object_ptr<Ui::BoxContent> box,
+		Ui::LayerOptions options,
 		anim::type animated) {
 	if (box) {
 		ensureLayerCreated();
@@ -555,13 +594,12 @@ bool MainWindow::eventFilter(QObject *object, QEvent *e) {
 }
 
 void MainWindow::updateTrayMenu(bool force) {
-    if (!trayIconMenu || (Platform::IsWindows() && !force)) return;
+	if (!trayIconMenu || (Platform::IsWindows() && !force)) return;
 
-	auto iconMenu = trayIconMenu;
-	auto actions = iconMenu->actions();
+	auto actions = trayIconMenu->actions();
 	if (Platform::IsLinux()) {
 		auto minimizeAction = actions.at(1);
-		minimizeAction->setDisabled(!isVisible());
+		minimizeAction->setEnabled(isVisible());
 	} else {
 		updateIsActive(0);
 		auto active = isActive();
@@ -572,12 +610,6 @@ void MainWindow::updateTrayMenu(bool force) {
 		toggleAction->setText(active
 			? tr::lng_minimize_to_tray(tr::now)
 			: tr::lng_open_from_tray(tr::now));
-
-		// On macOS just remove trayIcon menu if the window is not active.
-		// So we will activate the window on click instead of showing the menu.
-		if (!active && Platform::IsMac()) {
-			iconMenu = nullptr;
-		}
 	}
 	auto notificationAction = actions.at(Platform::IsLinux() ? 2 : 1);
 	auto notificationActionText = Global::DesktopNotify()
@@ -585,13 +617,7 @@ void MainWindow::updateTrayMenu(bool force) {
 		: tr::lng_enable_notifications_from_tray(tr::now);
 	notificationAction->setText(notificationActionText);
 
-#ifndef Q_OS_WIN
-    if (trayIcon && trayIcon->contextMenu() != iconMenu) {
-		trayIcon->setContextMenu(iconMenu);
-    }
-#endif // !Q_OS_WIN
-
-    psTrayMenuUpdated();
+	psTrayMenuUpdated();
 }
 
 void MainWindow::onShowAddContact() {
@@ -600,7 +626,7 @@ void MainWindow::onShowAddContact() {
 	if (account().sessionExists()) {
 		Ui::show(
 			Box<AddContactBox>(&account().session()),
-			LayerOption::KeepOther);
+			Ui::LayerOption::KeepOther);
 	}
 }
 
@@ -612,7 +638,7 @@ void MainWindow::onShowNewGroup() {
 			Box<GroupInfoBox>(
 				sessionController(),
 				GroupInfoBox::Type::Group),
-			LayerOption::KeepOther);
+			Ui::LayerOption::KeepOther);
 	}
 }
 
@@ -624,7 +650,7 @@ void MainWindow::onShowNewChannel() {
 			Box<GroupInfoBox>(
 				sessionController(),
 				GroupInfoBox::Type::Channel),
-			LayerOption::KeepOther);
+			Ui::LayerOption::KeepOther);
 	}
 }
 
@@ -687,11 +713,11 @@ void MainWindow::fixOrder() {
 
 void MainWindow::showFromTray(QSystemTrayIcon::ActivationReason reason) {
 	if (reason != QSystemTrayIcon::Context) {
-		App::CallDelayed(1, this, [this] {
+		base::call_delayed(1, this, [this] {
 			updateTrayMenu();
 			updateGlobalMenu();
 		});
-        activate();
+		activate();
 		Notify::unreadCounterUpdated();
 	}
 }
@@ -700,6 +726,9 @@ void MainWindow::handleTrayIconActication(
 		QSystemTrayIcon::ActivationReason reason) {
 	updateIsActive(0);
 	if (Platform::IsMac() && isActive()) {
+		if (trayIcon && !trayIcon->contextMenu()) {
+			showFromTray(reason);
+		}
 		return;
 	}
 	if (reason == QSystemTrayIcon::Context) {

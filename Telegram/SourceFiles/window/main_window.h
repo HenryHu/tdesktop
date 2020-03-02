@@ -14,11 +14,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <QtWidgets/QSystemTrayIcon>
 
-class BoxContent;
-
 namespace Main {
 class Account;
 } // namespace Main
+
+namespace Ui {
+class BoxContent;
+} // namespace Ui
 
 namespace Window {
 
@@ -135,6 +137,8 @@ protected:
 	virtual void updateGlobalMenuHook() {
 	}
 
+	virtual void initTrayMenuHook() {
+	}
 	virtual bool hasTrayIcon() const {
 		return false;
 	}
@@ -145,6 +149,13 @@ protected:
 	}
 
 	virtual void updateControlsGeometry();
+
+	virtual void createGlobalMenu() {
+	}
+	virtual void initShadows() {
+	}
+	virtual void firstShadowsUpdate() {
+	}
 
 	// This one is overriden in Windows for historical reasons.
 	virtual int32 screenNameChecksum(const QString &name) const;
@@ -175,7 +186,7 @@ private:
 	object_ptr<Ui::RpWidget> _outdated;
 	object_ptr<TWidget> _body;
 	object_ptr<TWidget> _rightColumn = { nullptr };
-	QPointer<BoxContent> _termsBox;
+	QPointer<Ui::BoxContent> _termsBox;
 
 	QIcon _icon;
 	bool _usingSupportIcon = false;

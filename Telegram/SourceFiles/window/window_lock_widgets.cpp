@@ -19,12 +19,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/labels.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/toast/toast.h"
-#include "styles/style_boxes.h"
 #include "window/window_controller.h"
 #include "window/window_slide_animation.h"
 #include "window/window_session_controller.h"
 #include "main/main_account.h"
 #include "facades.h"
+#include "styles/style_layers.h"
+#include "styles/style_boxes.h"
 
 namespace Window {
 
@@ -68,13 +69,15 @@ void LockWidget::showAnimated(const QPixmap &bgAnimCache, bool back) {
 void LockWidget::animationCallback() {
 	update();
 	if (!_a_show.animating()) {
-		showChildren();
-		_window->widget()->setInnerFocus();
-
-		Ui::showChatsList();
-
-		_cacheUnder = _cacheOver = QPixmap();
+		showFinished();
 	}
+}
+
+void LockWidget::showFinished() {
+	showChildren();
+	_window->widget()->setInnerFocus();
+	Ui::showChatsList();
+	_cacheUnder = _cacheOver = QPixmap();
 }
 
 void LockWidget::paintEvent(QPaintEvent *e) {

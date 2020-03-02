@@ -31,8 +31,10 @@
 **
 ****************************************************************************/
 
+// For QTextItemInt declaraion
 #include <private/qtextengine_p.h>
 
+#ifndef TDESKTOP_DISABLE_GTK_INTEGRATION
 /* TODO: find a dynamic library with these symbols. */
 
 /* Debian maintainer: this function is taken from qfiledialog.cpp */
@@ -58,6 +60,7 @@ QStringList qt_make_filter_list(const QString &filter)
 
     return f.split(sep);
 }
+#endif // !TDESKTOP_DISABLE_GTK_INTEGRATION
 
 /* Debian maintainer: this constructor is taken from qtextengine.cpp for TextPainter::drawLine */
 QTextItemInt::QTextItemInt(const QGlyphLayout &g, QFont *font, const QChar *chars_, int numChars, QFontEngine *fe, const QTextCharFormat &format)

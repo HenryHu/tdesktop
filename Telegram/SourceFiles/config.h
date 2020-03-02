@@ -10,12 +10,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/version.h"
 #include "settings.h"
 
-constexpr str_const AppNameOld = "Telegram Win (Unofficial)";
-constexpr str_const AppName = "Telegram Desktop";
-
-constexpr str_const AppId = "{53F49750-6209-4FBF-9CA8-7A333C87D1ED}"; // used in updater.cpp and Setup.iss for Windows
-constexpr str_const AppFile = "Telegram";
-
 enum {
 	MaxSelectedItems = 100,
 
@@ -44,9 +38,6 @@ enum {
 	AudioVoiceMsgChannels = 2, // stereo
 
 	StickerMaxSize = 2048, // 2048x2048 is a max image size for sticker
-
-	MaxZoomLevel = 7, // x8
-	ZoomToScreenLevel = 1024, // just constant
 
 	PreloadHeightsCount = 3, // when 3 screens to scroll left make a preload request
 
@@ -143,14 +134,8 @@ w/CVnbwQOw0g5GBwwFV3r0uTTvy44xx8XXxk+Qknu4eBCsmrAFNnAgMBAAE=\n\
 
 #if defined TDESKTOP_API_ID && defined TDESKTOP_API_HASH
 
-#define TDESKTOP_API_HASH_TO_STRING_HELPER(V) #V
-#define TDESKTOP_API_HASH_TO_STRING(V) TDESKTOP_API_HASH_TO_STRING_HELPER(V)
-
 constexpr auto ApiId = TDESKTOP_API_ID;
-constexpr auto ApiHash = TDESKTOP_API_HASH_TO_STRING(TDESKTOP_API_HASH);
-
-#undef TDESKTOP_API_HASH_TO_STRING
-#undef TDESKTOP_API_HASH_TO_STRING_HELPER
+constexpr auto ApiHash = MACRO_TO_STRING(TDESKTOP_API_HASH);
 
 #else // TDESKTOP_API_ID && TDESKTOP_API_HASH
 
@@ -183,7 +168,7 @@ constexpr auto ApiHash = "344583e45741c457fe1862106095a5eb";
 #if (TDESKTOP_ALPHA_VERSION != 0)
 
 // Private key for downloading closed alphas.
-#include "../../../TelegramPrivate/alpha_private.h"
+#include "../../../DesktopPrivate/alpha_private.h"
 
 #else
 static const char *AlphaPrivateKey = "";

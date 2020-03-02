@@ -13,12 +13,24 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "support/support_common.h"
 #include "storage/serialize_common.h"
 #include "boxes/send_files_box.h"
+#include "base/platform/base_platform_info.h"
 
 namespace Main {
 namespace {
 
 constexpr auto kAutoLockTimeoutLateMs = crl::time(3000);
 constexpr auto kLegacyCallsPeerToPeerNobody = 4;
+constexpr auto kVersionTag = -1;
+constexpr auto kVersion = 1;
+constexpr auto kMaxSavedPlaybackPositions = 16;
+
+[[nodiscard]] qint32 SerializePlaybackSpeed(float64 speed) {
+	return int(std::round(std::clamp(speed * 4., 2., 8.))) - 2;
+}
+
+float64 DeserializePlaybackSpeed(qint32 speed) {
+	return (std::clamp(speed, 0, 6) + 2) / 4.;
+}
 
 } // namespace
 
@@ -27,24 +39,34 @@ Settings::Variables::Variables()
 , selectorTab(ChatHelpers::SelectorTab::Emoji)
 , floatPlayerColumn(Window::Column::Second)
 , floatPlayerCorner(RectPart::TopRight)
+, dialogsWidthRatio(ThirdColumnByDefault()
+	? kDefaultBigDialogsWidthRatio
+	: kDefaultDialogsWidthRatio)
 , sendSubmitWay(Ui::InputSubmitSettings::Enter)
 , supportSwitch(Support::SwitchSettings::Next) {
 }
 
+bool Settings::ThirdColumnByDefault() {
+	return Platform::IsMacStoreBuild();
+}
+
 QByteArray Settings::serialize() const {
 	const auto autoDownload = _variables.autoDownload.serialize();
-	auto size = sizeof(qint32) * 30;
+	auto size = sizeof(qint32) * 38;
 	for (auto i = _variables.soundOverrides.cbegin(), e = _variables.soundOverrides.cend(); i != e; ++i) {
 		size += Serialize::stringSize(i.key()) + Serialize::stringSize(i.value());
 	}
 	size += _variables.groupStickersSectionHidden.size() * sizeof(quint64);
+	size += _variables.mediaLastPlaybackPosition.size() * 2 * sizeof(quint64);
 	size += Serialize::bytearraySize(autoDownload);
+	size += Serialize::bytearraySize(_variables.videoPipGeometry);
 
 	auto result = QByteArray();
 	result.reserve(size);
 	{
 		QDataStream stream(&result, QIODevice::WriteOnly);
 		stream.setVersion(QDataStream::Qt_5_1);
+		stream << qint32(kVersionTag) << qint32(kVersion);
 		stream << static_cast<qint32>(_variables.selectorTab);
 		stream << qint32(_variables.lastSeenWarningSeen ? 1 : 0);
 		stream << qint32(_variables.tabbedSelectorSectionEnabled ? 1 : 0);
@@ -83,12 +105,19 @@ QByteArray Settings::serialize() const {
 		stream << qint32(_variables.notifyAboutPinned.current() ? 1 : 0);
 		stream << qint32(_variables.archiveInMainMenu.current() ? 1 : 0);
 		stream << qint32(_variables.skipArchiveInSearch.current() ? 1 : 0);
-		stream << qint32(_variables.autoplayGifs ? 1 : 0);
+		stream << qint32(0);// LEGACY _variables.autoplayGifs ? 1 : 0);
 		stream << qint32(_variables.loopAnimatedStickers ? 1 : 0);
 		stream << qint32(_variables.largeEmoji.current() ? 1 : 0);
 		stream << qint32(_variables.replaceEmoji.current() ? 1 : 0);
 		stream << qint32(_variables.suggestEmoji ? 1 : 0);
 		stream << qint32(_variables.suggestStickersByEmoji ? 1 : 0);
+		stream << qint32(_variables.spellcheckerEnabled.current() ? 1 : 0);
+		stream << qint32(_variables.mediaLastPlaybackPosition.size());
+		for (const auto &[id, time] : _variables.mediaLastPlaybackPosition) {
+			stream << quint64(id) << qint64(time);
+		}
+		stream << qint32(SerializePlaybackSpeed(_variables.videoPlaybackSpeed.current()));
+		stream << _variables.videoPipGeometry;
 	}
 	return result;
 }
@@ -100,6 +129,8 @@ void Settings::constructFromSerialized(const QByteArray &serialized) {
 
 	QDataStream stream(serialized);
 	stream.setVersion(QDataStream::Qt_5_1);
+	qint32 versionTag = 0;
+	qint32 version = 0;
 	qint32 selectorTab = static_cast<qint32>(ChatHelpers::SelectorTab::Emoji);
 	qint32 lastSeenWarningSeen = 0;
 	qint32 tabbedSelectorSectionEnabled = 1;
@@ -129,14 +160,24 @@ void Settings::constructFromSerialized(const QByteArray &serialized) {
 	qint32 notifyAboutPinned = _variables.notifyAboutPinned.current() ? 1 : 0;
 	qint32 archiveInMainMenu = _variables.archiveInMainMenu.current() ? 1 : 0;
 	qint32 skipArchiveInSearch = _variables.skipArchiveInSearch.current() ? 1 : 0;
-	qint32 autoplayGifs = _variables.autoplayGifs ? 1 : 0;
+	qint32 autoplayGifs = 1;
 	qint32 loopAnimatedStickers = _variables.loopAnimatedStickers ? 1 : 0;
 	qint32 largeEmoji = _variables.largeEmoji.current() ? 1 : 0;
 	qint32 replaceEmoji = _variables.replaceEmoji.current() ? 1 : 0;
 	qint32 suggestEmoji = _variables.suggestEmoji ? 1 : 0;
 	qint32 suggestStickersByEmoji = _variables.suggestStickersByEmoji ? 1 : 0;
+	qint32 spellcheckerEnabled = _variables.spellcheckerEnabled.current() ? 1 : 0;
+	std::vector<std::pair<DocumentId, crl::time>> mediaLastPlaybackPosition;
+	qint32 videoPlaybackSpeed = SerializePlaybackSpeed(_variables.videoPlaybackSpeed.current());
+	QByteArray videoPipGeometry = _variables.videoPipGeometry;
 
-	stream >> selectorTab;
+	stream >> versionTag;
+	if (versionTag == kVersionTag) {
+		stream >> version;
+		stream >> selectorTab;
+	} else {
+		selectorTab = versionTag;
+	}
 	stream >> lastSeenWarningSeen;
 	if (!stream.atEnd()) {
 		stream >> tabbedSelectorSectionEnabled;
@@ -234,6 +275,27 @@ void Settings::constructFromSerialized(const QByteArray &serialized) {
 		stream >> suggestEmoji;
 		stream >> suggestStickersByEmoji;
 	}
+	if (!stream.atEnd()) {
+		stream >> spellcheckerEnabled;
+	}
+	if (!stream.atEnd()) {
+		auto count = qint32(0);
+		stream >> count;
+		if (stream.status() == QDataStream::Ok) {
+			for (auto i = 0; i != count; ++i) {
+				quint64 documentId;
+				qint64 time;
+				stream >> documentId >> time;
+				mediaLastPlaybackPosition.emplace_back(documentId, time);
+			}
+		}
+	}
+	if (!stream.atEnd()) {
+		stream >> videoPlaybackSpeed;
+	}
+	if (!stream.atEnd()) {
+		stream >> videoPipGeometry;
+	}
 	if (stream.status() != QDataStream::Ok) {
 		LOG(("App Error: "
 			"Bad data for Main::Settings::constructFromSerialized()"));
@@ -242,6 +304,13 @@ void Settings::constructFromSerialized(const QByteArray &serialized) {
 	if (!autoDownload.isEmpty()
 		&& !_variables.autoDownload.setFromSerialized(autoDownload)) {
 		return;
+	}
+	if (!version) {
+		if (!autoplayGifs) {
+			using namespace Data::AutoDownload;
+			_variables.autoDownload = WithDisabledAutoPlay(
+				_variables.autoDownload);
+		}
 	}
 
 	auto uncheckedTab = static_cast<ChatHelpers::SelectorTab>(selectorTab);
@@ -307,12 +376,15 @@ void Settings::constructFromSerialized(const QByteArray &serialized) {
 	_variables.notifyAboutPinned = (notifyAboutPinned == 1);
 	_variables.archiveInMainMenu = (archiveInMainMenu == 1);
 	_variables.skipArchiveInSearch = (skipArchiveInSearch == 1);
-	_variables.autoplayGifs = (autoplayGifs == 1);
 	_variables.loopAnimatedStickers = (loopAnimatedStickers == 1);
 	_variables.largeEmoji = (largeEmoji == 1);
 	_variables.replaceEmoji = (replaceEmoji == 1);
 	_variables.suggestEmoji = (suggestEmoji == 1);
 	_variables.suggestStickersByEmoji = (suggestStickersByEmoji == 1);
+	_variables.spellcheckerEnabled = (spellcheckerEnabled == 1);
+	_variables.mediaLastPlaybackPosition = std::move(mediaLastPlaybackPosition);
+	_variables.videoPlaybackSpeed = DeserializePlaybackSpeed(videoPlaybackSpeed);
+	_variables.videoPipGeometry = videoPipGeometry;
 }
 
 void Settings::setSupportChatsTimeSlice(int slice) {
@@ -405,6 +477,34 @@ int Settings::thirdColumnWidth() const {
 
 rpl::producer<int> Settings::thirdColumnWidthChanges() const {
 	return _variables.thirdColumnWidth.changes();
+}
+
+void Settings::setMediaLastPlaybackPosition(DocumentId id, crl::time time) {
+	auto &map = _variables.mediaLastPlaybackPosition;
+	const auto i = ranges::find(
+		map,
+		id,
+		&std::pair<DocumentId, crl::time>::first);
+	if (i != map.end()) {
+		if (time > 0) {
+			i->second = time;
+		} else {
+			map.erase(i);
+		}
+	} else if (time > 0) {
+		if (map.size() >= kMaxSavedPlaybackPositions) {
+			map.erase(map.begin());
+		}
+		map.emplace_back(id, time);
+	}
+}
+
+crl::time Settings::mediaLastPlaybackPosition(DocumentId id) const {
+	const auto i = ranges::find(
+		_variables.mediaLastPlaybackPosition,
+		id,
+		&std::pair<DocumentId, crl::time>::first);
+	return (i != _variables.mediaLastPlaybackPosition.end()) ? i->second : 0;
 }
 
 void Settings::setArchiveCollapsed(bool collapsed) {
