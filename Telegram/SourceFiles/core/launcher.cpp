@@ -275,9 +275,6 @@ int Launcher::exec() {
 	Platform::start();
 	Ui::DisableCustomScaling();
 
-	// Telegram doesn't start when extraordinary theme is set, see launchpad.net/bugs/1680943
-	unsetenv("QT_QPA_PLATFORMTHEME");
-
 	auto result = executeApplication();
 
 	DEBUG_LOG(("Telegram finished, result: %1").arg(result));
