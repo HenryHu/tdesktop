@@ -254,7 +254,7 @@ void Launcher::init() {
 
 #ifndef OS_MAC_OLD
 	QApplication::setAttribute(Qt::AA_DisableHighDpiScaling, true);
-#endif // not defined Q_OS_MAC and QT_VERSION >= 5.6.0
+#endif // OS_MAC_OLD
 
 	initHook();
 }
