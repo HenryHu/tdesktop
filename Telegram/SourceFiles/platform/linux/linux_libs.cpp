@@ -187,15 +187,6 @@ f_g_type_check_instance_cast g_type_check_instance_cast = nullptr;
 f_g_type_check_instance_is_a g_type_check_instance_is_a = nullptr;
 f_g_signal_connect_data g_signal_connect_data = nullptr;
 f_g_signal_handler_disconnect g_signal_handler_disconnect = nullptr;
-<<<<<<< HEAD
-#ifdef HAVE_APPINDICATOR
-f_app_indicator_new app_indicator_new = nullptr;
-f_app_indicator_set_status app_indicator_set_status = nullptr;
-f_app_indicator_set_menu app_indicator_set_menu = nullptr;
-f_app_indicator_set_icon_full app_indicator_set_icon_full = nullptr;
-#endif
-=======
->>>>>>> 742de6282f329424fabf54c3579f71c361452c04
 f_gdk_init_check gdk_init_check = nullptr;
 f_gdk_pixbuf_new_from_data gdk_pixbuf_new_from_data = nullptr;
 f_gdk_pixbuf_new_from_file gdk_pixbuf_new_from_file = nullptr;
