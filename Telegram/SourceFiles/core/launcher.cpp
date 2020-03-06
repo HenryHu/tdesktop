@@ -18,8 +18,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/concurrent_timer.h"
 #include "facades.h"
 
-#include "FREEBSD_QT_PLUGINDIR.h"
-
 namespace Core {
 namespace {
 
@@ -277,8 +275,6 @@ int Launcher::exec() {
 	Platform::start();
 	Ui::DisableCustomScaling();
 
-	// I don't know why path is not in QT_PLUGIN_PATH by default
-	QCoreApplication::addLibraryPath(FREEBSD_QT_PLUGINDIR);
 	// Telegram doesn't start when extraordinary theme is set, see launchpad.net/bugs/1680943
 	unsetenv("QT_QPA_PLATFORMTHEME");
 
