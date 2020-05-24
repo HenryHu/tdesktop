@@ -937,6 +937,7 @@ void ListWidget::selectItemAsGroup(not_null<HistoryItem*> item) {
 			item,
 			SelectAction::Select);
 		pushSelectedItems();
+		update();
 	}
 }
 
@@ -1156,6 +1157,11 @@ void ListWidget::elementStartStickerLoop(not_null<const Element*> view) {
 void ListWidget::elementShowPollResults(
 	not_null<PollData*> poll,
 	FullMsgId context) {
+}
+
+void ListWidget::elementShowTooltip(
+	const TextWithEntities &text,
+	Fn<void()> hiddenCallback) {
 }
 
 void ListWidget::saveState(not_null<ListMemento*> memento) {

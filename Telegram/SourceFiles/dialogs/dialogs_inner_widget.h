@@ -22,7 +22,7 @@ class Session;
 namespace Ui {
 class IconButton;
 class PopupMenu;
-class LinkButton;
+class FlatLabel;
 } // namespace Ui
 
 namespace Window {
@@ -92,11 +92,14 @@ public:
 	void removeDialog(Key key);
 	void repaintDialogRow(FilterId filterId, not_null<Row*> row);
 	void repaintDialogRow(RowDescriptor row);
+	void refreshDialogRow(RowDescriptor row);
 
 	void dragLeft();
 
 	void clearFilter();
 	void refresh(bool toTop = false);
+	void refreshEmptyLabel();
+	void resizeEmptyLabel();
 
 	bool chooseRow();
 
@@ -166,6 +169,13 @@ private:
 		NextOrEnd,
 		PreviousOrOriginal,
 		NextOrOriginal,
+	};
+
+	enum class EmptyState : uchar {
+		None,
+		Loading,
+		NoContacts,
+		EmptyFolder,
 	};
 
 	Main::Session &session() const;
@@ -357,6 +367,7 @@ private:
 	int _filteredPressed = -1;
 
 	bool _waitingForSearch = false;
+	EmptyState _emptyState = EmptyState::None;
 
 	QString _peerSearchQuery;
 	std::vector<std::unique_ptr<PeerSearchResult>> _peerSearchResults;
@@ -376,8 +387,7 @@ private:
 
 	WidgetState _state = WidgetState::Default;
 
-	object_ptr<Ui::LinkButton> _addContactLnk;
-	object_ptr<Ui::LinkButton> _editFilterLnk;
+	object_ptr<Ui::FlatLabel> _empty = { nullptr };
 	object_ptr<Ui::IconButton> _cancelSearchInChat;
 	object_ptr<Ui::IconButton> _cancelSearchFromUser;
 

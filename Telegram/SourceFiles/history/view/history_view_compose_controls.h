@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/unique_qptr.h"
 #include "ui/rp_widget.h"
 #include "ui/effects/animations.h"
+#include "ui/widgets/input_fields.h"
 #include "chat_helpers/tabbed_selector.h"
 
 class History;
@@ -31,7 +32,6 @@ namespace Ui {
 class SendButton;
 class IconButton;
 class EmojiButton;
-class InputField;
 } // namespace Ui
 
 namespace Main {
@@ -76,7 +76,14 @@ public:
 	[[nodiscard]] auto inlineResultChosen() const
 		-> rpl::producer<ChatHelpers::TabbedSelector::InlineChosen>;
 
-	void pushTabbedSelectorToThirdSection(const Window::SectionShow &params);
+	using MimeDataHook = Fn<bool(
+		not_null<const QMimeData*> data,
+		Ui::InputField::MimeAction action)>;
+	void setMimeDataHook(MimeDataHook hook);
+
+	bool pushTabbedSelectorToThirdSection(
+		not_null<PeerData*> peer,
+		const Window::SectionShow &params);
 	bool returnTabbedSelector();
 
 	void showForGrab();

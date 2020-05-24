@@ -341,9 +341,10 @@ void start(not_null<Core::Launcher*> launcher) {
 
 	if (cAlphaVersion()) {
 		workingDirChosen = true;
+	} else {
 
 #if defined Q_OS_MAC || defined Q_OS_LINUX || defined Q_OS_FREEBSD
-	} else {
+
 		if (!cWorkingDir().isEmpty()) {
 			// This value must come from TelegramForcePortable
 			// or from the "-workdir" command line argument.
@@ -361,12 +362,17 @@ void start(not_null<Core::Launcher*> launcher) {
 		moveOldDataFrom = initialWorkingDir;
 #endif // (Q_OS_LINUX || Q_OS_FREEBSD) && !_DEBUG
 
-#elif defined Q_OS_WINRT // Q_OS_MAC || Q_OS_LINUX || Q_OS_FREEBSD
 	} else {
 		cForceWorkingDir(psAppDataPath());
 		workingDirChosen = true;
 
+#elif defined Q_OS_WINRT // Q_OS_MAC || Q_OS_LINUX || Q_OS_FREEBSD
+
+		cForceWorkingDir(psAppDataPath());
+		workingDirChosen = true;
+
 #elif defined OS_WIN_STORE // Q_OS_MAC || Q_OS_LINUX || Q_OS_WINRT || Q_OS_FREEBSD
+
 #ifdef _DEBUG
 		cForceWorkingDir(cExeDir());
 #else // _DEBUG
@@ -375,7 +381,7 @@ void start(not_null<Core::Launcher*> launcher) {
 		workingDirChosen = true;
 
 #elif defined Q_OS_WIN
-	} else {
+
 		if (!cWorkingDir().isEmpty()) {
 			// This value must come from TelegramForcePortable
 			// or from the "-workdir" command line argument.
@@ -384,6 +390,7 @@ void start(not_null<Core::Launcher*> launcher) {
 		}
 
 #endif // Q_OS_MAC || Q_OS_LINUX || Q_OS_WINRT || OS_WIN_STORE || Q_OS_FREEBSD
+
 	}
 
 	LogsData = new LogsDataFields();

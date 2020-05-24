@@ -1622,6 +1622,9 @@ bool History::readInboxTillNeedsRequest(MsgId tillId) {
 	if (unreadMark()) {
 		owner().histories().changeDialogUnreadMark(this, false);
 	}
+	DEBUG_LOG(("Reading: readInboxTillNeedsRequest is_server %1, before %2."
+		).arg(Logs::b(IsServerMsgId(tillId))
+		).arg(_inboxReadBefore.value_or(-666)));
 	return IsServerMsgId(tillId) && (_inboxReadBefore.value_or(1) <= tillId);
 }
 
@@ -1639,10 +1642,17 @@ bool History::unreadCountRefreshNeeded(MsgId readTillId) const {
 
 std::optional<int> History::countStillUnreadLocal(MsgId readTillId) const {
 	if (isEmpty() || !folderKnown()) {
+		DEBUG_LOG(("Reading: countStillUnreadLocal unknown %1 and %2."
+			).arg(Logs::b(isEmpty())
+			).arg(Logs::b(folderKnown())));
 		return std::nullopt;
 	}
 	if (_inboxReadBefore) {
 		const auto before = *_inboxReadBefore;
+		DEBUG_LOG(("Reading: check before %1 with min %2 and max %3."
+			).arg(before
+			).arg(minMsgId()
+			).arg(maxMsgId()));
 		if (minMsgId() <= before && maxMsgId() >= readTillId) {
 			auto result = 0;
 			for (const auto &block : blocks) {
@@ -1658,12 +1668,19 @@ std::optional<int> History::countStillUnreadLocal(MsgId readTillId) const {
 					}
 				}
 			}
+			DEBUG_LOG(("Reading: check before result %1 with existing %2"
+				).arg(result
+				).arg(_unreadCount.value_or(-666)));
 			if (_unreadCount) {
 				return std::max(*_unreadCount - result, 0);
 			}
 		}
 	}
 	const auto minimalServerId = minMsgId();
+	DEBUG_LOG(("Reading: check at end loaded from %1 loaded %2 - %3"
+		).arg(minimalServerId
+		).arg(Logs::b(loadedAtBottom())
+		).arg(Logs::b(loadedAtTop())));
 	if (!loadedAtBottom()
 		|| (!loadedAtTop() && !minimalServerId)
 		|| minimalServerId > readTillId) {
@@ -1682,6 +1699,7 @@ std::optional<int> History::countStillUnreadLocal(MsgId readTillId) const {
 			}
 		}
 	}
+	DEBUG_LOG(("Reading: check at end counted %1").arg(result));
 	return result;
 }
 
@@ -1706,9 +1724,6 @@ void History::applyInboxReadUpdate(
 }
 
 void History::inboxRead(MsgId upTo, std::optional<int> stillUnread) {
-	if (unreadCount() > 0 && loadedAtBottom()) {
-		App::main()->historyToDown(this);
-	}
 	if (stillUnread.has_value() && folderKnown()) {
 		setUnreadCount(*stillUnread);
 	} else if (const auto still = countStillUnreadLocal(upTo)) {
@@ -1948,12 +1963,6 @@ void History::setFolderPointer(Data::Folder *folder) {
 	const auto wasInList = inChatList();
 	if (wasInList) {
 		removeFromChatList(0, owner().chatsList(this->folder()));
-		for (const auto &filter : filters.list()) {
-			const auto id = filter.id();
-			if (inChatList(id)) {
-				removeFromChatList(id, filters.chatsList(id));
-			}
-		}
 	}
 	const auto was = _folder.value_or(nullptr);
 	_folder = folder;
@@ -1962,12 +1971,10 @@ void History::setFolderPointer(Data::Folder *folder) {
 	}
 	if (wasInList) {
 		addToChatList(0, owner().chatsList(folder));
-		for (const auto &filter : filters.list()) {
-			if (filter.contains(this)) {
-				const auto id = filter.id();
-				addToChatList(id, filters.chatsList(id));
-			}
-		}
+
+		owner().chatsFilters().refreshHistory(this);
+		updateChatListEntry();
+
 		owner().chatsListChanged(was);
 		owner().chatsListChanged(folder);
 	} else if (!wasKnown) {
@@ -1976,6 +1983,9 @@ void History::setFolderPointer(Data::Folder *folder) {
 	if (folder) {
 		folder->registerOne(this);
 	}
+	Notify::peerUpdatedDelayed(
+		peer,
+		Notify::PeerUpdate::Flag::FolderChanged);
 }
 
 void History::applyPinnedUpdate(const MTPDupdateDialogPinned &data) {
@@ -2591,17 +2601,19 @@ void History::updateChatListExistence() {
 	//}
 }
 
-bool History::useProxyPromotion() const {
-	if (!isProxyPromoted()) {
+bool History::useTopPromotion() const {
+	if (!isTopPromoted()) {
 		return false;
 	} else if (const auto channel = peer->asChannel()) {
 		return !isPinnedDialog(FilterId()) && !channel->amIn();
+	} else if (const auto user = peer->asUser()) {
+		return !isPinnedDialog(FilterId()) && user->isBot() && isEmpty();
 	}
 	return false;
 }
 
 int History::fixedOnTopIndex() const {
-	return useProxyPromotion() ? kProxyPromotionFixOnTopIndex : 0;
+	return useTopPromotion() ? kTopPromotionFixOnTopIndex : 0;
 }
 
 bool History::trackUnreadMessages() const {
@@ -2618,7 +2630,7 @@ bool History::shouldBeInChatList() const {
 		return true;
 	} else if (const auto channel = peer->asChannel()) {
 		if (!channel->amIn()) {
-			return isProxyPromoted();
+			return isTopPromoted();
 		//} else if (const auto feed = channel->feed()) { // #feed
 		//	return !feed->needUpdateInChatList();
 		}
@@ -2626,6 +2638,10 @@ bool History::shouldBeInChatList() const {
 		return chat->amIn()
 			|| !lastMessageKnown()
 			|| (lastMessage() != nullptr);
+	} else if (const auto user = peer->asUser()) {
+		if (user->isBot() && isTopPromoted()) {
+			return true;
+		}
 	}
 	return !lastMessageKnown()
 		|| (lastMessage() != nullptr);
@@ -2727,6 +2743,41 @@ void History::dialogEntryApplied() {
 			}
 		}
 	}
+}
+
+void History::cacheTopPromotion(
+		bool promoted,
+		const QString &type,
+		const QString &message) {
+	const auto changed = (isTopPromoted() != promoted);
+	cacheTopPromoted(promoted);
+	if (topPromotionType() != type || _topPromotedMessage != message) {
+		_topPromotedType = type;
+		_topPromotedMessage = message;
+		cloudDraftTextCache.clear();
+	} else if (changed) {
+		cloudDraftTextCache.clear();
+	}
+}
+
+QStringRef History::topPromotionType() const {
+	return topPromotionAboutShown()
+		? _topPromotedType.midRef(5)
+		: _topPromotedType.midRef(0);
+}
+
+bool History::topPromotionAboutShown() const {
+	return _topPromotedType.startsWith("seen^");
+}
+
+void History::markTopPromotionAboutShown() {
+	if (!topPromotionAboutShown()) {
+		_topPromotedType = "seen^" + _topPromotedType;
+	}
+}
+
+QString History::topPromotionMessage() const {
+	return _topPromotedMessage;
 }
 
 bool History::clearUnreadOnClientSide() const {

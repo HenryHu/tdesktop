@@ -548,18 +548,10 @@ void EditCaptionBox::prepare() {
 		if (action == Ui::InputField::MimeAction::Check) {
 			if (!data->hasText() && !_isAllowedEditMedia) {
 				return false;
-			}
-			if (data->hasImage()) {
-				const auto image = qvariant_cast<QImage>(data->imageData());
-				if (!image.isNull()) {
-					return true;
-				}
-			}
-			if (const auto urls = data->urls(); !urls.empty()) {
-				if (ranges::find_if(
-					urls,
-					[](const QUrl &url) { return !url.isLocalFile(); }
-				) == urls.end()) {
+			} else if (data->hasImage()) {
+				return true;
+			} else if (const auto urls = data->urls(); !urls.empty()) {
+				if (ranges::all_of(urls, &QUrl::isLocalFile)) {
 					return true;
 				}
 			}

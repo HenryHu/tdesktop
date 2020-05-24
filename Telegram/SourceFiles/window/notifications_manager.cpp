@@ -27,6 +27,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "facades.h"
 #include "app.h"
 
+#include <QtGui/QWindow>
+
 namespace Window {
 namespace Notifications {
 namespace {
@@ -34,6 +36,12 @@ namespace {
 // not more than one sound in 500ms from one peer - grouping
 constexpr auto kMinimalAlertDelay = crl::time(500);
 constexpr auto kWaitingForAllGroupedDelay = crl::time(1000);
+
+#ifdef Q_OS_MAC
+constexpr auto kSystemAlertDuration = crl::time(1000);
+#else // !Q_OS_MAC
+constexpr auto kSystemAlertDuration = crl::time(0);
+#endif // Q_OS_MAC
 
 } // namespace
 
@@ -290,7 +298,14 @@ void System::showNext() {
 		}
 	}
 	if (alert) {
-		Platform::Notifications::FlashBounce();
+		if (Global::FlashBounceNotify() && !Platform::Notifications::SkipFlashBounce()) {
+			if (const auto widget = App::wnd()) {
+				if (const auto window = widget->windowHandle()) {
+					window->alert(kSystemAlertDuration);
+					// (window, SLOT(_q_clearAlert())); in the future.
+				}
+			}
+		}
 		if (Global::SoundNotify() && !Platform::Notifications::SkipAudio()) {
 			ensureSoundCreated();
 			_soundTrack->playOnce();

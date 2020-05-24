@@ -208,7 +208,7 @@ public:
 	void requestChangelog(
 		const QString &sinceVersion,
 		Fn<void(const MTPUpdates &result)> callback);
-	void refreshProxyPromotion();
+	void refreshTopPromotion();
 	void requestDeepLinkInfo(
 		const QString &path,
 		Fn<void(const MTPDhelp_deepLinkInfo &result)> callback);
@@ -476,6 +476,10 @@ public:
 	void closePoll(not_null<HistoryItem*> item);
 	void reloadPollResults(not_null<HistoryItem*> item);
 
+	void rescheduleMessage(
+		not_null<HistoryItem*> item,
+		Api::SendOptions options);
+
 private:
 	struct MessageDataRequest {
 		using Callbacks = QList<RequestMessageDataCallback>;
@@ -646,8 +650,8 @@ private:
 
 	//void readFeeds(); // #feed
 
-	void getProxyPromotionDelayed(TimeId now, TimeId next);
-	void proxyPromotionDone(const MTPhelp_ProxyData &proxy);
+	void getTopPromotionDelayed(TimeId now, TimeId next);
+	void topPromotionDone(const MTPhelp_PromoData &proxy);
 
 	void sendNotifySettingsUpdates();
 
@@ -787,10 +791,10 @@ private:
 	//base::flat_map<not_null<Data::Feed*>, mtpRequestId> _feedReadRequests;
 	//base::Timer _feedReadTimer;
 
-	mtpRequestId _proxyPromotionRequestId = 0;
-	std::pair<QString, uint32> _proxyPromotionKey;
-	TimeId _proxyPromotionNextRequestTime = TimeId(0);
-	base::Timer _proxyPromotionTimer;
+	mtpRequestId _topPromotionRequestId = 0;
+	std::pair<QString, uint32> _topPromotionKey;
+	TimeId _topPromotionNextRequestTime = TimeId(0);
+	base::Timer _topPromotionTimer;
 
 	base::flat_set<not_null<const PeerData*>> _updateNotifySettingsPeers;
 	base::Timer _updateNotifySettingsTimer;

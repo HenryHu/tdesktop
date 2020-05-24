@@ -88,8 +88,8 @@ constexpr auto kMaxUsersPerInvite = 100;
 // that was added to this chat.
 constexpr auto kForwardMessagesOnAdd = 100;
 
-constexpr auto kProxyPromotionInterval = TimeId(60 * 60);
-constexpr auto kProxyPromotionMinDelay = TimeId(10);
+constexpr auto kTopPromotionInterval = TimeId(60 * 60);
+constexpr auto kTopPromotionMinDelay = TimeId(10);
 constexpr auto kSmallDelayMs = 5;
 constexpr auto kUnreadMentionsPreloadIfLess = 5;
 constexpr auto kUnreadMentionsFirstRequestLimit = 10;
@@ -237,7 +237,7 @@ ApiWrap::ApiWrap(not_null<Main::Session*> session)
 , _dialogsLoadState(std::make_unique<DialogsLoadState>())
 , _fileLoader(std::make_unique<TaskQueue>(kFileLoaderQueueStopTimeout))
 //, _feedReadTimer([=] { readFeeds(); }) // #feed
-, _proxyPromotionTimer([=] { refreshProxyPromotion(); })
+, _topPromotionTimer([=] { refreshTopPromotion(); })
 , _updateNotifySettingsTimer([=] { sendNotifySettingsUpdates(); })
 , _selfDestruct(std::make_unique<Api::SelfDestruct>(this))
 , _sensitiveContent(std::make_unique<Api::SensitiveContent>(this)) {
@@ -288,13 +288,13 @@ void ApiWrap::requestChangelog(
 	).send();
 }
 
-void ApiWrap::refreshProxyPromotion() {
+void ApiWrap::refreshTopPromotion() {
 	const auto now = base::unixtime::now();
-	const auto next = (_proxyPromotionNextRequestTime != 0)
-		? _proxyPromotionNextRequestTime
+	const auto next = (_topPromotionNextRequestTime != 0)
+		? _topPromotionNextRequestTime
 		: now;
-	if (_proxyPromotionRequestId) {
-		getProxyPromotionDelayed(now, next);
+	if (_topPromotionRequestId) {
+		getTopPromotionDelayed(now, next);
 		return;
 	}
 	const auto key = [&]() -> std::pair<QString, uint32> {
@@ -307,51 +307,51 @@ void ApiWrap::refreshProxyPromotion() {
 		}
 		return { proxy.host, proxy.port };
 	}();
-	if (_proxyPromotionKey == key && now < next) {
-		getProxyPromotionDelayed(now, next);
+	if (_topPromotionKey == key && now < next) {
+		getTopPromotionDelayed(now, next);
 		return;
 	}
-	_proxyPromotionKey = key;
-	if (key.first.isEmpty() || !key.second) {
-		proxyPromotionDone(MTP_help_proxyDataEmpty(
-			MTP_int(base::unixtime::now() + kProxyPromotionInterval)));
-		return;
-	}
-	_proxyPromotionRequestId = request(MTPhelp_GetProxyData(
-	)).done([=](const MTPhelp_ProxyData &result) {
-		_proxyPromotionRequestId = 0;
-		proxyPromotionDone(result);
+	_topPromotionKey = key;
+	_topPromotionRequestId = request(MTPhelp_GetPromoData(
+	)).done([=](const MTPhelp_PromoData &result) {
+		_topPromotionRequestId = 0;
+		topPromotionDone(result);
 	}).fail([=](const RPCError &error) {
-		_proxyPromotionRequestId = 0;
+		_topPromotionRequestId = 0;
 		const auto now = base::unixtime::now();
-		const auto next = _proxyPromotionNextRequestTime = now
-			+ kProxyPromotionInterval;
-		if (!_proxyPromotionTimer.isActive()) {
-			getProxyPromotionDelayed(now, next);
+		const auto next = _topPromotionNextRequestTime = now
+			+ kTopPromotionInterval;
+		if (!_topPromotionTimer.isActive()) {
+			getTopPromotionDelayed(now, next);
 		}
 	}).send();
 }
 
-void ApiWrap::getProxyPromotionDelayed(TimeId now, TimeId next) {
-	_proxyPromotionTimer.callOnce(std::min(
-		std::max(next - now, kProxyPromotionMinDelay),
-		kProxyPromotionInterval) * crl::time(1000));
+void ApiWrap::getTopPromotionDelayed(TimeId now, TimeId next) {
+	_topPromotionTimer.callOnce(std::min(
+		std::max(next - now, kTopPromotionMinDelay),
+		kTopPromotionInterval) * crl::time(1000));
 };
 
-void ApiWrap::proxyPromotionDone(const MTPhelp_ProxyData &proxy) {
-	_proxyPromotionNextRequestTime = proxy.match([&](const auto &data) {
+void ApiWrap::topPromotionDone(const MTPhelp_PromoData &proxy) {
+	_topPromotionNextRequestTime = proxy.match([&](const auto &data) {
 		return data.vexpires().v;
 	});
-	getProxyPromotionDelayed(base::unixtime::now(), _proxyPromotionNextRequestTime);
+	getTopPromotionDelayed(
+		base::unixtime::now(),
+		_topPromotionNextRequestTime);
 
-	proxy.match([&](const MTPDhelp_proxyDataEmpty &data) {
-		_session->data().setProxyPromoted(nullptr);
-	}, [&](const MTPDhelp_proxyDataPromo &data) {
+	proxy.match([&](const MTPDhelp_promoDataEmpty &data) {
+		_session->data().setTopPromoted(nullptr, QString(), QString());
+	}, [&](const MTPDhelp_promoData &data) {
 		_session->data().processChats(data.vchats());
 		_session->data().processUsers(data.vusers());
 		const auto peerId = peerFromMTP(data.vpeer());
 		const auto peer = _session->data().peer(peerId);
-		_session->data().setProxyPromoted(peer);
+		_session->data().setTopPromoted(
+			peer,
+			data.vpsa_type().value_or_empty(),
+			data.vpsa_message().value_or_empty());
 		if (const auto history = _session->data().historyLoaded(peer)) {
 			history->owner().histories().requestDialogEntry(history);
 		}
@@ -4328,15 +4328,7 @@ void ApiWrap::forwardMessages(
 	auto flags = MTPDmessage::Flags(0);
 	auto clientFlags = MTPDmessage_ClientFlags();
 	auto sendFlags = MTPmessages_ForwardMessages::Flags(0);
-	if (channelPost) {
-		flags |= MTPDmessage::Flag::f_views;
-		flags |= MTPDmessage::Flag::f_post;
-	}
-	if (!channelPost) {
-		flags |= MTPDmessage::Flag::f_from_id;
-	} else if (peer->asChannel()->addsSignature()) {
-		flags |= MTPDmessage::Flag::f_post_author;
-	}
+	FillMessagePostFlags(action, peer, flags);
 	if (silentPost) {
 		sendFlags |= MTPmessages_ForwardMessages::Flag::f_silent;
 	}
@@ -4489,15 +4481,7 @@ void ApiWrap::sendSharedContact(
 	if (action.replyTo) {
 		flags |= MTPDmessage::Flag::f_reply_to_msg_id;
 	}
-	if (channelPost) {
-		flags |= MTPDmessage::Flag::f_views;
-		flags |= MTPDmessage::Flag::f_post;
-		if (peer->asChannel()->addsSignature()) {
-			flags |= MTPDmessage::Flag::f_post_author;
-		}
-	} else {
-		flags |= MTPDmessage::Flag::f_from_id;
-	}
+	FillMessagePostFlags(action, peer, flags);
 	if (action.options.scheduled) {
 		flags |= MTPDmessage::Flag::f_from_scheduled;
 	} else {
@@ -4874,15 +4858,7 @@ void ApiWrap::sendMessage(MessageToSend &&message) {
 		const auto channelPost = peer->isChannel() && !peer->isMegagroup();
 		const auto silentPost = action.options.silent
 			|| (channelPost && _session->data().notifySilentPosts(peer));
-		if (channelPost) {
-			flags |= MTPDmessage::Flag::f_views;
-			flags |= MTPDmessage::Flag::f_post;
-		}
-		if (!channelPost) {
-			flags |= MTPDmessage::Flag::f_from_id;
-		} else if (peer->asChannel()->addsSignature()) {
-			flags |= MTPDmessage::Flag::f_post_author;
-		}
+		FillMessagePostFlags(action, peer, flags);
 		if (silentPost) {
 			sendFlags |= MTPmessages_SendMessage::Flag::f_silent;
 		}
@@ -5019,15 +4995,7 @@ void ApiWrap::sendInlineResult(
 	bool channelPost = peer->isChannel() && !peer->isMegagroup();
 	bool silentPost = action.options.silent
 		|| (channelPost && _session->data().notifySilentPosts(peer));
-	if (channelPost) {
-		flags |= MTPDmessage::Flag::f_views;
-		flags |= MTPDmessage::Flag::f_post;
-	}
-	if (!channelPost) {
-		flags |= MTPDmessage::Flag::f_from_id;
-	} else if (peer->asChannel()->addsSignature()) {
-		flags |= MTPDmessage::Flag::f_post_author;
-	}
+	FillMessagePostFlags(action, peer, flags);
 	if (silentPost) {
 		sendFlags |= MTPmessages_SendInlineBotResult::Flag::f_silent;
 	}
@@ -5754,16 +5722,6 @@ void ApiWrap::createPoll(
 	if (action.options.scheduled) {
 		sendFlags |= MTPmessages_SendMedia::Flag::f_schedule_date;
 	}
-
-	const auto inputFlags = data.quiz()
-		? MTPDinputMediaPoll::Flag::f_correct_answers
-		: MTPDinputMediaPoll::Flag(0);
-	auto correct = QVector<MTPbytes>();
-	for (const auto &answer : data.answers) {
-		if (answer.correct) {
-			correct.push_back(MTP_bytes(answer.option));
-		}
-	}
 	auto &histories = history->owner().histories();
 	const auto requestType = Data::Histories::RequestType::Send;
 	histories.sendRequest(history, requestType, [=](Fn<void()> finish) {
@@ -5772,10 +5730,7 @@ void ApiWrap::createPoll(
 			MTP_flags(sendFlags),
 			peer->input,
 			MTP_int(replyTo),
-			MTP_inputMediaPoll(
-				MTP_flags(inputFlags),
-				PollDataToMTP(&data),
-				MTP_vector<MTPbytes>(correct)),
+			PollDataToInputMedia(&data),
 			MTP_string(),
 			MTP_long(rand_value<uint64>()),
 			MTPReplyMarkup(),
@@ -5852,25 +5807,12 @@ void ApiWrap::closePoll(not_null<HistoryItem*> item) {
 	if (!poll) {
 		return;
 	}
-
-	const auto inputFlags = poll->quiz()
-		? MTPDinputMediaPoll::Flag::f_correct_answers
-		: MTPDinputMediaPoll::Flag(0);
-	auto correct = QVector<MTPbytes>();
-	for (const auto &answer : poll->answers) {
-		if (answer.correct) {
-			correct.push_back(MTP_bytes(answer.option));
-		}
-	}
 	const auto requestId = request(MTPmessages_EditMessage(
 		MTP_flags(MTPmessages_EditMessage::Flag::f_media),
 		item->history()->peer->input,
 		MTP_int(item->id),
 		MTPstring(),
-		MTP_inputMediaPoll(
-			MTP_flags(inputFlags),
-			PollDataToMTP(poll, true),
-			MTP_vector<MTPbytes>(correct)),
+		PollDataToInputMedia(poll, true),
 		MTPReplyMarkup(),
 		MTPVector<MTPMessageEntity>(),
 		MTP_int(0) // schedule_date
@@ -5881,6 +5823,43 @@ void ApiWrap::closePoll(not_null<HistoryItem*> item) {
 		_pollCloseRequestIds.erase(itemId);
 	}).send();
 	_pollCloseRequestIds.emplace(itemId, requestId);
+}
+
+void ApiWrap::rescheduleMessage(
+		not_null<HistoryItem*> item,
+		Api::SendOptions options) {
+	const auto text = item->originalText().text;
+	const auto sentEntities = Api::EntitiesToMTP(
+		item->originalText().entities,
+		Api::ConvertOption::SkipLocal);
+	const auto media = item->media();
+
+	const auto emptyFlag = MTPmessages_EditMessage::Flag(0);
+	const auto flags = MTPmessages_EditMessage::Flag::f_schedule_date
+	| (!text.isEmpty()
+		? MTPmessages_EditMessage::Flag::f_message
+		: emptyFlag)
+	| ((!media || !media->webpage())
+		? MTPmessages_EditMessage::Flag::f_no_webpage
+		: emptyFlag)
+	| (!sentEntities.v.isEmpty()
+		? MTPmessages_EditMessage::Flag::f_entities
+		: emptyFlag);
+
+	const auto id = _session->data().scheduledMessages().lookupId(item);
+	request(MTPmessages_EditMessage(
+		MTP_flags(flags),
+		item->history()->peer->input,
+		MTP_int(id),
+		MTP_string(text),
+		MTPInputMedia(),
+		MTPReplyMarkup(),
+		sentEntities,
+		MTP_int(options.scheduled)
+	)).done([=](const MTPUpdates &result) {
+		applyUpdates(result);
+	}).fail([](const RPCError &error) {
+	}).send();
 }
 
 void ApiWrap::reloadPollResults(not_null<HistoryItem*> item) {

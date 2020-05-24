@@ -267,7 +267,7 @@ PeerData *HistoryItem::displayFrom() const {
 void HistoryItem::invalidateChatListEntry() {
 	if (const auto main = App::main()) {
 		// #TODO feeds search results
-		main->repaintDialogRow({ history(), fullId() });
+		main->refreshDialogRow({ history(), fullId() });
 	}
 
 	// invalidate cache for drawInDialog
@@ -585,13 +585,11 @@ bool HistoryItem::canDeleteForEveryone(TimeId now) const {
 			return false;
 		}
 	}
-	if (!peer->isUser()) {
-		if (!toHistoryMessage()) {
+	if (!peer->isUser() && !toHistoryMessage()) {
+		return false;
+	} else if (const auto media = this->media()) {
+		if (!media->allowsRevoke(now)) {
 			return false;
-		} else if (const auto media = this->media()) {
-			if (!media->allowsRevoke()) {
-				return false;
-			}
 		}
 	}
 	if (!out()) {
@@ -708,6 +706,17 @@ MsgId HistoryItem::idOriginal() const {
 		return forwarded->originalId;
 	}
 	return id;
+}
+
+void HistoryItem::updateDate(TimeId newDate) {
+	if (canUpdateDate() && _date != newDate) {
+		_date = newDate;
+		_history->owner().requestItemViewRefresh(this);
+	}
+}
+
+bool HistoryItem::canUpdateDate() const {
+	return isScheduled();
 }
 
 void HistoryItem::sendFailed() {

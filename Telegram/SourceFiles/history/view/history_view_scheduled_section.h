@@ -82,7 +82,8 @@ public:
 		not_null<ScheduledMemento*> memento);
 
 	// Tabbed selector management.
-	void pushTabbedSelectorToThirdSection(
+	bool pushTabbedSelectorToThirdSection(
+		not_null<PeerData*> peer,
 		const Window::SectionShow &params) override;
 	bool returnTabbedSelector() override;
 
@@ -156,6 +157,10 @@ private:
 		const QString &insertTextOnCancel = QString());
 	bool confirmSendingFiles(
 		Storage::PreparedList &&list,
+		CompressConfirm compressed,
+		const QString &insertTextOnCancel = QString());
+	bool confirmSendingFiles(
+		not_null<const QMimeData*> data,
 		CompressConfirm compressed,
 		const QString &insertTextOnCancel = QString());
 	bool showSendingFilesError(const Storage::PreparedList &list) const;
