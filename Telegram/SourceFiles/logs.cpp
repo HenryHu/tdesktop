@@ -362,10 +362,6 @@ void start(not_null<Core::Launcher*> launcher) {
 		moveOldDataFrom = initialWorkingDir;
 #endif // (Q_OS_LINUX || Q_OS_FREEBSD) && !_DEBUG
 
-	} else {
-		cForceWorkingDir(psAppDataPath());
-		workingDirChosen = true;
-
 #elif defined Q_OS_WINRT // Q_OS_MAC || Q_OS_LINUX || Q_OS_FREEBSD
 
 		cForceWorkingDir(psAppDataPath());
