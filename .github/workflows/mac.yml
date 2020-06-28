@@ -88,6 +88,7 @@ jobs:
           echo $MIN_MAC >> CACHE_KEY.txt
           echo $PREFIX >> CACHE_KEY.txt
           echo $MANUAL_CACHING >> CACHE_KEY.txt
+          echo "$GITHUB_WORKSPACE" >> CACHE_KEY.txt
           if [ "$AUTO_CACHING" == "1" ]; then
             thisFile=$REPO_NAME/.github/workflows/mac.yml
             echo `md5 -q $thisFile` >> CACHE_KEY.txt
@@ -403,7 +404,7 @@ jobs:
         uses: actions/cache@v1
         with:
           path: ${{ env.LibrariesPath }}/qt-cache
-          key: ${{ runner.OS }}-qt-${{ env.CACHE_KEY }}-${{ hashFiles('**/qtbase_5_12_8.diff') }}
+          key: ${{ runner.OS }}-qt-${{ env.CACHE_KEY }}-${{ hashFiles('**/qtbase_5_12_8/*') }}
       - name: Use cached Qt 5.12.8.
         if: steps.cache-qt.outputs.cache-hit == 'true'
         run: |
@@ -423,7 +424,7 @@ jobs:
           git submodule update qtbase
           git submodule update qtimageformats
           cd qtbase
-          git apply ../../patches/qtbase_$QT.diff
+          find ../../patches/qtbase_$QT -type f -print0 | sort -z | xargs -0 git apply
           cd ..
 
           ./configure \

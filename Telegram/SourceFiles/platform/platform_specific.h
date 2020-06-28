@@ -28,6 +28,8 @@ enum class SystemSettingsType {
 
 void SetWatchingMediaKeys(bool watching);
 void SetApplicationIcon(const QIcon &icon);
+QString CurrentExecutablePath(int argc, char *argv[]);
+QString SingleInstanceLocalServerName(const QString &hash);
 void RegisterCustomScheme(bool force = false);
 PermissionStatus GetPermissionStatus(PermissionType type);
 void RequestPermission(PermissionType type, Fn<void(PermissionStatus)> resultCallback);
@@ -40,6 +42,8 @@ bool OpenSystemSettings(SystemSettingsType type);
 }
 
 void IgnoreApplicationActivationRightNow();
+bool AutostartSupported();
+QImage GetImageFromClipboard();
 
 namespace ThirdParty {
 
@@ -51,8 +55,8 @@ void finish();
 
 #ifdef Q_OS_MAC
 #include "platform/mac/specific_mac.h"
-#elif defined Q_OS_LINUX || defined Q_OS_FREEBSD // Q_OS_MAC
+#elif defined Q_OS_UNIX // Q_OS_MAC
 #include "platform/linux/specific_linux.h"
-#elif defined Q_OS_WIN // Q_OS_MAC || Q_OS_LINUX || Q_OS_FREEBSD
+#elif defined Q_OS_WIN // Q_OS_MAC || Q_OS_UNIX
 #include "platform/win/specific_win.h"
-#endif // Q_OS_MAC || Q_OS_LINUX || Q_OS_WIN || Q_OS_FREEBSD
+#endif // Q_OS_MAC || Q_OS_UNIX || Q_OS_WIN

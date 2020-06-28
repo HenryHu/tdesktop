@@ -2218,10 +2218,11 @@ void History::loadUserpic() {
 
 void History::paintUserpic(
 		Painter &p,
+		std::shared_ptr<Data::CloudImageView> &view,
 		int x,
 		int y,
 		int size) const {
-	peer->paintUserpic(p, x, y, size);
+	peer->paintUserpic(p, view, x, y, size);
 }
 
 void History::startBuildingFrontBlock(int expectedItemsCount) {
@@ -2699,7 +2700,10 @@ void History::applyDialog(
 
 	const auto draft = data.vdraft();
 	if (draft && draft->type() == mtpc_draftMessage) {
-		Data::applyPeerCloudDraft(peer->id, draft->c_draftMessage());
+		Data::ApplyPeerCloudDraft(
+			&session(),
+			peer->id,
+			draft->c_draftMessage());
 	}
 	owner().histories().dialogEntryApplied(this);
 }
@@ -3360,7 +3364,9 @@ void HistoryBlock::refreshView(not_null<Element*> view) {
 	Expects(view->block() == this);
 
 	const auto item = view->data();
-	auto refreshed = item->createView(HistoryInner::ElementDelegate());
+	auto refreshed = item->createView(
+		HistoryInner::ElementDelegate(),
+		view);
 
 	auto blockIndex = indexInHistory();
 	auto itemIndex = view->indexInBlock();

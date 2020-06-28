@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/send_files_box.h"
 
+#include "platform/platform_specific.h"
 #include "lang/lang_keys.h"
 #include "storage/localstorage.h"
 #include "storage/storage_media_prepare.h"
@@ -888,7 +889,6 @@ void SingleMediaPreview::prepareAnimatedPreview(
 		_gifPreview = Media::Clip::MakeReader(
 			animatedPreviewPath,
 			std::move(callback));
-		if (_gifPreview) _gifPreview->setAutoplay();
 	}
 }
 
@@ -1832,11 +1832,7 @@ void SendFilesBox::setupShadows(
 }
 
 void SendFilesBox::prepare() {
-	_send = addButton(
-		(_sendType == Api::SendType::Normal
-			? tr::lng_send_button()
-			: tr::lng_schedule_button()),
-		[=] { send({}); });
+	_send = addButton(tr::lng_send_button(), [=] { send({}); });
 	if (_sendType == Api::SendType::Normal) {
 		SetupSendMenuAndShortcuts(
 			_send,
@@ -1854,9 +1850,8 @@ void SendFilesBox::prepare() {
 		}
 	}, lifetime());
 
-	const auto title = tr::lng_stickers_featured_add(tr::now) + qsl("...");
 	_addFileToAlbum = addLeftButton(
-		rpl::single(title),
+		tr::lng_stickers_featured_add(),
 		App::LambdaDelayed(st::historyAttach.ripple.hideDuration, this, [=] {
 			openDialogToAddFileToAlbum();
 		}));
@@ -2174,7 +2169,10 @@ bool SendFilesBox::addFiles(not_null<const QMimeData*> data) {
 		if (result.error == Storage::PreparedList::Error::None) {
 			return result;
 		} else if (data->hasImage()) {
-			auto image = qvariant_cast<QImage>(data->imageData());
+			auto image = Platform::GetImageFromClipboard();
+			if (image.isNull()) {
+				image = qvariant_cast<QImage>(data->imageData());
+			}
 			if (!image.isNull()) {
 				return Storage::PrepareMediaFromImage(
 					std::move(image),

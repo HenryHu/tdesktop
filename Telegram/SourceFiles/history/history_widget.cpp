@@ -63,6 +63,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "chat_helpers/tabbed_section.h"
 #include "chat_helpers/bot_keyboard.h"
 #include "chat_helpers/message_field.h"
+#include "platform/platform_specific.h"
 #include "lang/lang_keys.h"
 #include "mainwidget.h"
 #include "mainwindow.h"
@@ -380,7 +381,9 @@ HistoryWidget::HistoryWidget(
 
 	InitMessageField(controller, _field);
 	_fieldAutocomplete->hide();
-	connect(_fieldAutocomplete, SIGNAL(mentionChosen(UserData*,FieldAutocomplete::ChooseMethod)), this, SLOT(onMentionInsert(UserData*)));
+	connect(_fieldAutocomplete, &FieldAutocomplete::mentionChosen, this, [=](not_null<UserData*> user) {
+		onMentionInsert(user);
+	});
 	connect(_fieldAutocomplete, SIGNAL(hashtagChosen(QString,FieldAutocomplete::ChooseMethod)), this, SLOT(onHashtagOrBotCommandInsert(QString,FieldAutocomplete::ChooseMethod)));
 	connect(_fieldAutocomplete, SIGNAL(botCommandChosen(QString,FieldAutocomplete::ChooseMethod)), this, SLOT(onHashtagOrBotCommandInsert(QString,FieldAutocomplete::ChooseMethod)));
 	connect(_fieldAutocomplete, &FieldAutocomplete::stickerChosen, this, [=](not_null<DocumentData*> document) {
@@ -1724,8 +1727,6 @@ void HistoryWidget::showHistory(
 		cancelTypingAction();
 	}
 
-	session().data().stopPlayingVideoFiles();
-
 	clearReplyReturns();
 	if (_history) {
 		if (Ui::InFocusChain(_list)) {
@@ -2024,6 +2025,7 @@ void HistoryWidget::refreshScheduledToggle() {
 			controller()->showSection(
 				HistoryView::ScheduledMemento(_history));
 		});
+		orderWidgets(); // Raise drag areas to the top.
 	} else if (_scheduled && !has) {
 		_scheduled.destroy();
 	}
@@ -2984,8 +2986,9 @@ void HistoryWidget::saveEditMsg() {
 	if (webPageId == CancelledWebPageId) {
 		sendFlags |= MTPmessages_EditMessage::Flag::f_no_webpage;
 	}
-	auto localEntities = Api::EntitiesToMTP(sending.entities);
+	auto localEntities = Api::EntitiesToMTP(&session(), sending.entities);
 	auto sentEntities = Api::EntitiesToMTP(
+		&session(),
 		sending.entities,
 		Api::ConvertOption::SkipLocal);
 	if (!sentEntities.v.isEmpty()) {
@@ -4510,7 +4513,10 @@ bool HistoryWidget::confirmSendingFiles(
 	}
 
 	if (hasImage) {
-		auto image = qvariant_cast<QImage>(data->imageData());
+		auto image = Platform::GetImageFromClipboard();
+		if (image.isNull()) {
+			image = qvariant_cast<QImage>(data->imageData());
+		}
 		if (!image.isNull()) {
 			confirmSendingFiles(
 				std::move(image),
@@ -4660,7 +4666,7 @@ void HistoryWidget::sendFileConfirmed(
 		session().user()).flags;
 	TextUtilities::PrepareForSending(caption, prepareFlags);
 	TextUtilities::Trim(caption);
-	auto localEntities = Api::EntitiesToMTP(caption.entities);
+	auto localEntities = Api::EntitiesToMTP(&session(), caption.entities);
 
 	if (itemToEdit) {
 		if (const auto id = itemToEdit->groupId()) {
@@ -5530,7 +5536,15 @@ void HistoryWidget::updateUnreadMentionsVisibility() {
 }
 
 void HistoryWidget::mousePressEvent(QMouseEvent *e) {
-	_replyForwardPressed = QRect(0, _field->y() - st::historySendPadding - st::historyReplyHeight, st::historyReplySkip, st::historyReplyHeight).contains(e->pos());
+	const auto hasSecondLayer = (_editMsgId
+		|| _replyToId
+		|| readyToForward()
+		|| _kbReplyTo);
+	_replyForwardPressed = hasSecondLayer && QRect(
+		0,
+		_field->y() - st::historySendPadding - st::historyReplyHeight,
+		st::historyReplySkip,
+		st::historyReplyHeight).contains(e->pos());
 	if (_replyForwardPressed && !_fieldBarCancel->isHidden()) {
 		updateField();
 	} else if (_inReplyEditForward) {
@@ -6762,7 +6776,7 @@ void HistoryWidget::drawField(Painter &p, const QRect &rect) {
 				if (drawMsgText->media() && drawMsgText->media()->hasReplyPreview()) {
 					if (const auto image = drawMsgText->media()->replyPreview()) {
 						auto to = QRect(replyLeft, backy + st::msgReplyPadding.top(), st::msgReplyBarSize.height(), st::msgReplyBarSize.height());
-						p.drawPixmap(to.x(), to.y(), image->pixSingle(drawMsgText->fullId(), image->width() / cIntRetinaFactor(), image->height() / cIntRetinaFactor(), to.width(), to.height(), ImageRoundRadius::Small));
+						p.drawPixmap(to.x(), to.y(), image->pixSingle(image->width() / cIntRetinaFactor(), image->height() / cIntRetinaFactor(), to.width(), to.height(), ImageRoundRadius::Small));
 					}
 					replyLeft += st::msgReplyBarSize.height() + st::msgReplyBarSkip - st::msgReplyBarSize.width() - st::msgReplyBarPos.x();
 				}
@@ -6797,10 +6811,10 @@ void HistoryWidget::drawField(Painter &p, const QRect &rect) {
 			if (preview) {
 				auto to = QRect(forwardLeft, backy + st::msgReplyPadding.top(), st::msgReplyBarSize.height(), st::msgReplyBarSize.height());
 				if (preview->width() == preview->height()) {
-					p.drawPixmap(to.x(), to.y(), preview->pix(firstItem->fullId()));
+					p.drawPixmap(to.x(), to.y(), preview->pix());
 				} else {
 					auto from = (preview->width() > preview->height()) ? QRect((preview->width() - preview->height()) / 2, 0, preview->height(), preview->height()) : QRect(0, (preview->height() - preview->width()) / 2, preview->width(), preview->width());
-					p.drawPixmap(to, preview->pix(firstItem->fullId()), from);
+					p.drawPixmap(to, preview->pix(), from);
 				}
 				forwardLeft += st::msgReplyBarSize.height() + st::msgReplyBarSkip - st::msgReplyBarSize.width() - st::msgReplyBarPos.x();
 			}
@@ -6822,10 +6836,10 @@ void HistoryWidget::drawField(Painter &p, const QRect &rect) {
 			if (preview) {
 				auto to = QRect(previewLeft, backy + st::msgReplyPadding.top(), st::msgReplyBarSize.height(), st::msgReplyBarSize.height());
 				if (preview->width() == preview->height()) {
-					p.drawPixmap(to.x(), to.y(), preview->pix(Data::FileOrigin()));
+					p.drawPixmap(to.x(), to.y(), preview->pix());
 				} else {
 					auto from = (preview->width() > preview->height()) ? QRect((preview->width() - preview->height()) / 2, 0, preview->height(), preview->height()) : QRect(0, (preview->height() - preview->width()) / 2, preview->width(), preview->width());
-					p.drawPixmap(to, preview->pix(Data::FileOrigin()), from);
+					p.drawPixmap(to, preview->pix(), from);
 				}
 			}
 			previewLeft += st::msgReplyBarSize.height() + st::msgReplyBarSkip - st::msgReplyBarSize.width() - st::msgReplyBarPos.x();
@@ -6919,7 +6933,6 @@ void HistoryWidget::drawPinnedBar(Painter &p) {
 
 	auto top = _topBar->bottomNoMargins();
 	bool serviceColor = false, hasForward = readyToForward();
-	ImagePtr preview;
 	p.fillRect(myrtlrect(0, top, width(), st::historyReplyHeight), st::historyPinnedBg);
 
 	top += st::msgReplyPadding.top();
@@ -6932,7 +6945,7 @@ void HistoryWidget::drawPinnedBar(Painter &p) {
 		if (media && media->hasReplyPreview()) {
 			if (const auto image = media->replyPreview()) {
 				QRect to(left, top, st::msgReplyBarSize.height(), st::msgReplyBarSize.height());
-				p.drawPixmap(to.x(), to.y(), image->pixSingle(_pinnedBar->msg->fullId(), image->width() / cIntRetinaFactor(), image->height() / cIntRetinaFactor(), to.width(), to.height(), ImageRoundRadius::Small));
+				p.drawPixmap(to.x(), to.y(), image->pixSingle(image->width() / cIntRetinaFactor(), image->height() / cIntRetinaFactor(), to.width(), to.height(), ImageRoundRadius::Small));
 			}
 			left += st::msgReplyBarSize.height() + st::msgReplyBarSkip - st::msgReplyBarSize.width() - st::msgReplyBarPos.x();
 		}

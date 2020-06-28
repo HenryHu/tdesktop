@@ -29,6 +29,7 @@ class SessionController;
 
 namespace Data {
 struct Group;
+class CloudImageView;
 } // namespace Data
 
 namespace HistoryView {
@@ -183,9 +184,11 @@ public:
 	// ElementDelegate interface.
 	Context elementContext() override;
 	std::unique_ptr<Element> elementCreate(
-		not_null<HistoryMessage*> message) override;
+		not_null<HistoryMessage*> message,
+		Element *replacing = nullptr) override;
 	std::unique_ptr<Element> elementCreate(
-		not_null<HistoryService*> message) override;
+		not_null<HistoryService*> message,
+		Element *replacing = nullptr) override;
 	bool elementUnderCursor(not_null<const Element*> view) override;
 	void elementAnimationAutoplayAsync(
 		not_null<const Element*> view) override;
@@ -454,6 +457,9 @@ private:
 	int _itemsHeight = 0;
 	int _itemAverageHeight = 0;
 	base::flat_set<FullMsgId> _animatedStickersPlayed;
+	base::flat_map<
+		not_null<PeerData*>,
+		std::shared_ptr<Data::CloudImageView>> _userpics, _userpicsCache;
 
 	int _minHeight = 0;
 	int _visibleTop = 0;

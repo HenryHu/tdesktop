@@ -431,12 +431,16 @@ NotificationsCount::~NotificationsCount() {
 NotificationsCount::SampleWidget::SampleWidget(
 	NotificationsCount *owner,
 	const QPixmap &cache)
-: QWidget(nullptr)
+: QWidget(Core::App().getModalParent())
 , _owner(owner)
 , _cache(cache) {
-	resize(
+	const QSize size(
 		cache.width() / cache.devicePixelRatio(),
 		cache.height() / cache.devicePixelRatio());
+
+	resize(size);
+	setMinimumSize(size);
+	setMaximumSize(size);
 
 	setWindowFlags(Qt::WindowFlags(Qt::FramelessWindowHint)
 		| Qt::WindowStaysOnTopHint
@@ -495,11 +499,11 @@ void NotificationsCount::SampleWidget::destroyDelayed() {
 	_deleted = true;
 
 	// Ubuntu has a lag if deleteLater() called immediately.
-#if defined Q_OS_LINUX32 || defined Q_OS_LINUX64 || defined Q_OS_FREEBSD
+#if defined Q_OS_UNIX && !defined Q_OS_MAC
 	QTimer::singleShot(1000, [this] { delete this; });
-#else // Q_OS_LINUX32 || Q_OS_LINUX64 || Q_OS_FREEBSD
+#else // Q_OS_UNIX && !Q_OS_MAC
 	deleteLater();
-#endif // Q_OS_LINUX32 || Q_OS_LINUX64 || Q_OS_FREEBSD
+#endif // Q_OS_UNIX && !Q_OS_MAC
 }
 
 void SetupAdvancedNotifications(
@@ -629,7 +633,7 @@ void SetupNotificationsContent(
 			return QString();
 		} else if (Platform::IsWindows()) {
 			return tr::lng_settings_use_windows(tr::now);
-		} else if (Platform::IsLinux()) {
+		} else if (Platform::IsLinux() && !Platform::IsWayland()) {
 			return tr::lng_settings_use_native_notifications(tr::now);
 		}
 		return QString();
@@ -647,6 +651,9 @@ void SetupNotificationsContent(
 	}();
 
 	const auto advancedSlide = !Platform::IsMac10_8OrGreater()
+#ifndef TDESKTOP_DISABLE_DBUS_INTEGRATION
+		&& !Platform::IsWayland()
+#endif // !TDESKTOP_DISABLE_DBUS_INTEGRATION
 		? container->add(
 			object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
 				container,

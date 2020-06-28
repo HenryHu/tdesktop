@@ -1,3 +1,4 @@
+
 /*
 This file is part of Telegram Desktop,
 the official desktop application for the Telegram messaging service.
@@ -8,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "platform/linux/notifications_manager_linux.h"
 
 #ifndef TDESKTOP_DISABLE_DBUS_INTEGRATION
+#include "base/platform/base_platform_info.h"
 #include "platform/linux/specific_linux.h"
 #include "history/history.h"
 #include "lang/lang_keys.h"
@@ -69,7 +71,7 @@ void GetSupported() {
 	}
 	Checked = true;
 
-	if (Global::NativeNotifications()) {
+	if (Global::NativeNotifications() && !Platform::IsWayland()) {
 		ComputeSupported(true);
 	} else {
 		ComputeSupported();
@@ -104,8 +106,8 @@ std::vector<QString> ComputeServerInformation() {
 }
 
 std::vector<QString> GetServerInformation() {
-	static const auto ServerInformation = ComputeServerInformation();
-	return ServerInformation;
+	static const auto Result = ComputeServerInformation();
+	return Result;
 }
 
 QStringList ComputeCapabilities() {
@@ -128,8 +130,8 @@ QStringList ComputeCapabilities() {
 }
 
 QStringList GetCapabilities() {
-	static const auto Capabilities = ComputeCapabilities();
-	return Capabilities;
+	static const auto Result = ComputeCapabilities();
+	return Result;
 }
 
 bool Inhibited() {
@@ -147,14 +149,14 @@ bool Inhibited() {
 	const QDBusReply<QVariant> reply = QDBusConnection::sessionBus().call(
 		message);
 
-	const auto notSupportedErrors = {
+	static const auto NotSupportedErrors = {
 		QDBusError::ServiceUnknown,
 		QDBusError::InvalidArgs,
 	};
 
 	if (reply.isValid()) {
 		return reply.value().toBool();
-	} else if (ranges::contains(notSupportedErrors, reply.error().type())) {
+	} else if (ranges::contains(NotSupportedErrors, reply.error().type())) {
 		InhibitedNotSupported = true;
 	} else {
 		if (reply.error().type() == QDBusError::AccessDenied) {
@@ -181,15 +183,11 @@ QVersionNumber ParseSpecificationVersion(
 
 QString GetImageKey(const QVersionNumber &specificationVersion) {
 	if (!specificationVersion.isNull()) {
-		const auto majorVersion = specificationVersion.majorVersion();
-		const auto minorVersion = specificationVersion.minorVersion();
-
-		if ((majorVersion == 1 && minorVersion >= 2) || majorVersion > 1) {
+		if (specificationVersion >= QVersionNumber(1, 2)) {
 			return qsl("image-data");
-		} else if (majorVersion == 1 && minorVersion == 1) {
+		} else if (specificationVersion == QVersionNumber(1, 1)) {
 			return qsl("image_data");
-		} else if ((majorVersion == 1 && minorVersion < 1)
-			|| majorVersion < 1) {
+		} else if (specificationVersion < QVersionNumber(1, 1)) {
 			return qsl("icon_data");
 		} else {
 			LOG(("Native notification error: unknown specification version"));
@@ -477,7 +475,8 @@ std::unique_ptr<Window::Notifications::Manager> Create(
 #ifndef TDESKTOP_DISABLE_DBUS_INTEGRATION
 	GetSupported();
 
-	if (Global::NativeNotifications() && Supported()) {
+	if ((Global::NativeNotifications() && Supported())
+		|| Platform::IsWayland()) {
 		return std::make_unique<Manager>(system);
 	}
 #endif // !TDESKTOP_DISABLE_DBUS_INTEGRATION
@@ -490,6 +489,10 @@ Manager::Private::Private(not_null<Manager*> manager, Type type)
 : _cachedUserpics(type)
 , _manager(manager) {
 	qDBusRegisterMetaType<NotificationData::ImageData>();
+
+	if (!Supported()) {
+		return;
+	}
 
 	const auto serverInformation = GetServerInformation();
 	const auto capabilities = GetCapabilities();
@@ -516,12 +519,15 @@ Manager::Private::Private(not_null<Manager*> manager, Type type)
 
 void Manager::Private::showNotification(
 		not_null<PeerData*> peer,
+		std::shared_ptr<Data::CloudImageView> &userpicView,
 		MsgId msgId,
 		const QString &title,
 		const QString &subtitle,
 		const QString &msg,
 		bool hideNameAndPhoto,
 		bool hideReplyButton) {
+	if (!Supported()) return;
+
 	auto notification = std::make_shared<NotificationData>(
 		_manager,
 		title,
@@ -532,8 +538,8 @@ void Manager::Private::showNotification(
 		hideReplyButton);
 
 	if (!hideNameAndPhoto) {
-		const auto key = peer->userpicUniqueKey();
-		notification->setImage(_cachedUserpics.get(key, peer));
+		const auto key = peer->userpicUniqueKey(userpicView);
+		notification->setImage(_cachedUserpics.get(key, peer, userpicView));
 	}
 
 	auto i = _notifications.find(peer->id);
@@ -560,6 +566,8 @@ void Manager::Private::showNotification(
 }
 
 void Manager::Private::clearAll() {
+	if (!Supported()) return;
+
 	auto temp = base::take(_notifications);
 	for_const (auto &notifications, temp) {
 		for_const (auto notification, notifications) {
@@ -569,6 +577,8 @@ void Manager::Private::clearAll() {
 }
 
 void Manager::Private::clearFromHistory(not_null<History*> history) {
+	if (!Supported()) return;
+
 	auto i = _notifications.find(history->peer->id);
 	if (i != _notifications.cend()) {
 		auto temp = base::take(i.value());
@@ -581,6 +591,8 @@ void Manager::Private::clearFromHistory(not_null<History*> history) {
 }
 
 void Manager::Private::clearNotification(PeerId peerId, MsgId msgId) {
+	if (!Supported()) return;
+
 	auto i = _notifications.find(peerId);
 	if (i != _notifications.cend()) {
 		i.value().remove(msgId);
@@ -607,6 +619,7 @@ Manager::~Manager() = default;
 
 void Manager::doShowNativeNotification(
 		not_null<PeerData*> peer,
+		std::shared_ptr<Data::CloudImageView> &userpicView,
 		MsgId msgId,
 		const QString &title,
 		const QString &subtitle,
@@ -615,6 +628,7 @@ void Manager::doShowNativeNotification(
 		bool hideReplyButton) {
 	_private->showNotification(
 		peer,
+		userpicView,
 		msgId,
 		title,
 		subtitle,

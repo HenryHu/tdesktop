@@ -16,6 +16,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/sender.h"
 #include "base/timer.h"
 
+namespace Data {
+class CloudImageView;
+} // namespace Data
+
 namespace Main {
 class Session;
 } // namespace Main
@@ -85,9 +89,11 @@ public:
 	// HistoryView::ElementDelegate interface.
 	HistoryView::Context elementContext() override;
 	std::unique_ptr<HistoryView::Element> elementCreate(
-		not_null<HistoryMessage*> message) override;
+		not_null<HistoryMessage*> message,
+		HistoryView::Element *replacing = nullptr) override;
 	std::unique_ptr<HistoryView::Element> elementCreate(
-		not_null<HistoryService*> message) override;
+		not_null<HistoryService*> message,
+		HistoryView::Element *replacing = nullptr) override;
 	bool elementUnderCursor(
 		not_null<const HistoryView::Element*> view) override;
 	void elementAnimationAutoplayAsync(
@@ -162,9 +168,9 @@ private:
 	QPoint mapPointToItem(QPoint point, const Element *view) const;
 
 	void showContextMenu(QContextMenuEvent *e, bool showFromTouch = false);
-	void savePhotoToFile(PhotoData *photo);
-	void saveDocumentToFile(DocumentData *document);
-	void copyContextImage(PhotoData *photo);
+	void savePhotoToFile(not_null<PhotoData*> photo);
+	void saveDocumentToFile(not_null<DocumentData*> document);
+	void copyContextImage(not_null<PhotoData*> photo);
 	void showStickerPackInfo(not_null<DocumentData*> document);
 	void cancelContextDownload(not_null<DocumentData*> document);
 	void showContextInFolder(not_null<DocumentData*> document);
@@ -230,6 +236,9 @@ private:
 	std::set<uint64> _eventIds;
 	std::map<not_null<const HistoryItem*>, not_null<Element*>> _itemsByData;
 	base::flat_set<FullMsgId> _animatedStickersPlayed;
+	base::flat_map<
+		not_null<PeerData*>,
+		std::shared_ptr<Data::CloudImageView>> _userpics, _userpicsCache;
 	int _itemsTop = 0;
 	int _itemsWidth = 0;
 	int _itemsHeight = 0;

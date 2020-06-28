@@ -20,22 +20,23 @@ namespace Platform {
 inline void SetWatchingMediaKeys(bool watching) {
 }
 
-bool InSandbox();
+bool InFlatpak();
 bool InSnap();
 bool InAppImage();
 bool IsStaticBinary();
-bool IsGtkFileDialogForced();
+bool UseGtkIntegration();
+bool IsGtkIntegrationForced();
+bool UseGtkFileDialog();
 bool IsQtPluginsBundled();
 
 bool IsXDGDesktopPortalPresent();
 bool UseXDGDesktopPortal();
+bool CanOpenDirectoryWithPortal();
 
 QString ProcessNameByPID(const QString &pid);
 QString RealExecutablePath(int argc, char *argv[]);
-QString CurrentExecutablePath(int argc, char *argv[]);
 
 QString AppRuntimeDirectory();
-QString SingleInstanceLocalServerName(const QString &hash);
 
 QString GetLauncherBasename();
 QString GetLauncherFilename();

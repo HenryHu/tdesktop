@@ -24,6 +24,10 @@ enum class SharedMediaType : signed char;
 using SharedMediaTypesMask = base::enum_mask<SharedMediaType>;
 } // namespace Storage
 
+namespace Lottie {
+class SinglePlayer;
+} // namespace Lottie
+
 namespace HistoryView {
 
 enum class PointState : char;
@@ -139,10 +143,10 @@ public:
 	}
 	virtual void stopAnimation() {
 	}
-	virtual void clearStickerLoopPlayed() {
+	virtual void stickerClearLoopPlayed() {
 	}
-	virtual int checkAnimationCount() {
-		return 0;
+	virtual std::unique_ptr<Lottie::SinglePlayer> stickerTakeLottie();
+	virtual void checkAnimation() {
 	}
 
 	[[nodiscard]] virtual QSize sizeForGrouping() const {
@@ -253,6 +257,9 @@ public:
 		crl::time ms) const {
 	}
 
+	virtual bool hasHeavyPart() const {
+		return false;
+	}
 	virtual void unloadHeavyPart() {
 	}
 

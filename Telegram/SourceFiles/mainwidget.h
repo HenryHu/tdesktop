@@ -22,6 +22,7 @@ class HistoryWidget;
 class StackItem;
 struct FileLoadResult;
 class History;
+class Image;
 
 namespace Api {
 struct SendAction;
@@ -37,6 +38,7 @@ struct PeerUpdate;
 
 namespace Data {
 class WallPaper;
+class CloudImageView;
 } // namespace Data
 
 namespace Dialogs {
@@ -106,7 +108,9 @@ class MainWidget
 public:
 	using SectionShow = Window::SectionShow;
 
-	MainWidget(QWidget *parent, not_null<Window::SessionController*> controller);
+	MainWidget(
+		QWidget *parent,
+		not_null<Window::SessionController*> controller);
 
 	[[nodiscard]] Main::Session &session() const;
 
@@ -266,8 +270,6 @@ public:
 	bool ptsUpdateAndApply(int32 pts, int32 ptsCount, const MTPUpdate &update);
 	bool ptsUpdateAndApply(int32 pts, int32 ptsCount);
 
-	void documentLoadProgress(DocumentData *document);
-
 	void searchInChat(Dialogs::Key chat);
 
 	void app_sendBotCallback(
@@ -299,8 +301,6 @@ signals:
 	void dialogsUpdated();
 
 public slots:
-	void documentLoadProgress(FileLoader *loader);
-	void documentLoadFailed(FileLoader *loader, bool started);
 	void inlineResultLoadProgress(FileLoader *loader);
 	void inlineResultLoadFailed(FileLoader *loader, bool started);
 
@@ -461,6 +461,8 @@ private:
 	int _dialogsWidth = 0;
 	int _thirdColumnWidth = 0;
 	Ui::Animations::Simple _a_dialogsWidth;
+
+	std::shared_ptr<Data::CloudImageView> _selfUserpicView;
 
 	object_ptr<Ui::PlainShadow> _sideShadow;
 	object_ptr<Ui::PlainShadow> _thirdShadow = { nullptr };

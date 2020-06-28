@@ -51,8 +51,14 @@ constexpr auto kDesktopFile = ":/misc/telegramdesktop.desktop"_cs;
 constexpr auto kSnapLauncherDir = "/var/lib/snapd/desktop/applications/"_cs;
 constexpr auto kIconName = "telegram"_cs;
 
+constexpr auto kXDGDesktopPortalService = "org.freedesktop.portal.Desktop"_cs;
+constexpr auto kXDGDesktopPortalObjectPath = "/org/freedesktop/portal/desktop"_cs;
+constexpr auto kPropertiesInterface = "org.freedesktop.DBus.Properties"_cs;
+
+QStringList PlatformThemes;
+
 #ifndef TDESKTOP_DISABLE_DBUS_INTEGRATION
-void SandboxAutostart(bool autostart, bool silent = false) {
+void PortalAutostart(bool autostart, bool silent = false) {
 	QVariantMap options;
 	options["reason"] = tr::lng_settings_auto_start(tr::now);
 	options["autostart"] = autostart;
@@ -63,8 +69,8 @@ void SandboxAutostart(bool autostart, bool silent = false) {
 	options["dbus-activatable"] = false;
 
 	auto message = QDBusMessage::createMethodCall(
-		qsl("org.freedesktop.portal.Desktop"),
-		qsl("/org/freedesktop/portal/desktop"),
+		kXDGDesktopPortalService.utf16(),
+		kXDGDesktopPortalObjectPath.utf16(),
 		qsl("org.freedesktop.portal.Background"),
 		qsl("RequestBackground"));
 
@@ -83,6 +89,34 @@ void SandboxAutostart(bool autostart, bool silent = false) {
 			LOG(("Flatpak autostart error: %1").arg(reply.error().message()));
 		}
 	}
+}
+
+uint FileChooserPortalVersion() {
+	static const auto Result = [&]() -> uint {
+		auto message = QDBusMessage::createMethodCall(
+			kXDGDesktopPortalService.utf16(),
+			kXDGDesktopPortalObjectPath.utf16(),
+			kPropertiesInterface.utf16(),
+			qsl("Get"));
+
+		message.setArguments({
+			qsl("org.freedesktop.portal.FileChooser"),
+			qsl("version")
+		});
+
+		const QDBusReply<uint> reply = QDBusConnection::sessionBus().call(message);
+
+		if (reply.isValid()) {
+			return reply.value();
+		} else {
+			LOG(("Error getting FileChooser portal version: %1")
+				.arg(reply.error().message()));
+		}
+
+		return 0;
+	}();
+
+	return Result;
 }
 #endif // !TDESKTOP_DISABLE_DBUS_INTEGRATION
 
@@ -240,19 +274,19 @@ void SetApplicationIcon(const QIcon &icon) {
 	QApplication::setWindowIcon(icon);
 }
 
-bool InSandbox() {
-	static const auto Sandbox = QFileInfo::exists(qsl("/.flatpak-info"));
-	return Sandbox;
+bool InFlatpak() {
+	static const auto Result = QFileInfo::exists(qsl("/.flatpak-info"));
+	return Result;
 }
 
 bool InSnap() {
-	static const auto Snap = qEnvironmentVariableIsSet("SNAP");
-	return Snap;
+	static const auto Result = qEnvironmentVariableIsSet("SNAP");
+	return Result;
 }
 
 bool InAppImage() {
-	static const auto AppImage = qEnvironmentVariableIsSet("APPIMAGE");
-	return AppImage;
+	static const auto Result = qEnvironmentVariableIsSet("APPIMAGE");
+	return Result;
 }
 
 bool IsStaticBinary() {
@@ -263,12 +297,36 @@ bool IsStaticBinary() {
 #endif // !DESKTOP_APP_USE_PACKAGED
 }
 
-bool IsGtkFileDialogForced() {
-#ifdef TDESKTOP_FORCE_GTK_FILE_DIALOG
-	return true;
-#else // TDESKTOP_FORCE_GTK_FILE_DIALOG
+bool UseGtkIntegration() {
+#ifndef TDESKTOP_DISABLE_GTK_INTEGRATION
+	static const auto Result = !qEnvironmentVariableIsSet(
+		"TDESKTOP_DISABLE_GTK_INTEGRATION");
+
+	return Result;
+#endif // !TDESKTOP_DISABLE_GTK_INTEGRATION
+
 	return false;
-#endif // !TDESKTOP_FORCE_GTK_FILE_DIALOG
+}
+
+bool IsGtkIntegrationForced() {
+#ifndef TDESKTOP_DISABLE_GTK_INTEGRATION
+	static const auto Result = [&] {
+		return PlatformThemes.contains(qstr("gtk3"), Qt::CaseInsensitive)
+			|| PlatformThemes.contains(qstr("gtk2"), Qt::CaseInsensitive);
+	}();
+
+	return Result;
+#endif // !TDESKTOP_DISABLE_GTK_INTEGRATION
+
+	return false;
+}
+
+bool UseGtkFileDialog() {
+#ifdef TDESKTOP_USE_GTK_FILE_DIALOG
+	return true;
+#else // TDESKTOP_USE_GTK_FILE_DIALOG
+	return false;
+#endif // !TDESKTOP_USE_GTK_FILE_DIALOG
 }
 
 bool IsQtPluginsBundled() {
@@ -280,30 +338,37 @@ bool IsQtPluginsBundled() {
 }
 
 bool IsXDGDesktopPortalPresent() {
-#ifdef TDESKTOP_DISABLE_DBUS_INTEGRATION
-	static const auto XDGDesktopPortalPresent = false;
-#else // TDESKTOP_DISABLE_DBUS_INTEGRATION
-	static const auto XDGDesktopPortalPresent = QDBusInterface(
-		"org.freedesktop.portal.Desktop",
-		"/org/freedesktop/portal/desktop").isValid();
+#ifndef TDESKTOP_DISABLE_DBUS_INTEGRATION
+	static const auto Result = QDBusInterface(
+		kXDGDesktopPortalService.utf16(),
+		kXDGDesktopPortalObjectPath.utf16()).isValid();
+
+	return Result;
 #endif // !TDESKTOP_DISABLE_DBUS_INTEGRATION
 
-	return XDGDesktopPortalPresent;
+	return false;
 }
 
 bool UseXDGDesktopPortal() {
-	static const auto UsePortal = [&] {
+	static const auto Result = [&] {
 		const auto envVar = qEnvironmentVariableIsSet("TDESKTOP_USE_PORTAL");
 		const auto portalPresent = IsXDGDesktopPortalPresent();
 
 		return (
 			DesktopEnvironment::IsKDE()
-				|| InSnap()
 				|| envVar
 			) && portalPresent;
 	}();
 
-	return UsePortal;
+	return Result;
+}
+
+bool CanOpenDirectoryWithPortal() {
+#if (QT_VERSION >= QT_VERSION_CHECK(5, 15, 0) || defined DESKTOP_APP_QT_PATCHED) && !defined TDESKTOP_DISABLE_DBUS_INTEGRATION
+	return FileChooserPortalVersion() >= 3;
+#else // (Qt >= 5.15 || DESKTOP_APP_QT_PATCHED) && !TDESKTOP_DISABLE_DBUS_INTEGRATION
+	return false;
+#endif // (Qt < 5.15 && !DESKTOP_APP_QT_PATCHED) || TDESKTOP_DISABLE_DBUS_INTEGRATION
 }
 
 QString ProcessNameByPID(const QString &pid) {
@@ -353,11 +418,11 @@ QString CurrentExecutablePath(int argc, char *argv[]) {
 }
 
 QString AppRuntimeDirectory() {
-	static const auto RuntimeDirectory = [&] {
+	static const auto Result = [&] {
 		auto runtimeDir = QStandardPaths::writableLocation(
 			QStandardPaths::RuntimeLocation);
 
-		if (InSandbox()) {
+		if (InFlatpak()) {
 			const auto flatpakId = [&] {
 				if (!qEnvironmentVariableIsEmpty("FLATPAK_ID")) {
 					return QString::fromLatin1(qgetenv("FLATPAK_ID"));
@@ -385,11 +450,11 @@ QString AppRuntimeDirectory() {
 		return runtimeDir;
 	}();
 
-	return RuntimeDirectory;
+	return Result;
 }
 
 QString SingleInstanceLocalServerName(const QString &hash) {
-	if (InSandbox() || InSnap()) {
+	if (InFlatpak() || InSnap()) {
 		return AppRuntimeDirectory() + hash;
 	} else {
 		return AppRuntimeDirectory() + hash + '-' + cGUIDStr();
@@ -397,7 +462,7 @@ QString SingleInstanceLocalServerName(const QString &hash) {
 }
 
 QString GetLauncherBasename() {
-	static const auto LauncherBasename = [&] {
+	static const auto Result = [&] {
 		if (InSnap()) {
 			const auto snapNameKey =
 				qEnvironmentVariableIsSet("SNAP_INSTANCE_NAME")
@@ -439,20 +504,57 @@ QString GetLauncherBasename() {
 		return possibleBasenames[0];
 	}();
 
-	return LauncherBasename;
+	return Result;
 }
 
 QString GetLauncherFilename() {
-	static const auto LauncherFilename = GetLauncherBasename()
+	static const auto Result = GetLauncherBasename()
 		+ qsl(".desktop");
-	return LauncherFilename;
+	return Result;
 }
 
 QString GetIconName() {
-	static const auto IconName = InSandbox()
+	static const auto Result = InFlatpak()
 		? GetLauncherBasename()
 		: kIconName.utf16();
-	return IconName;
+	return Result;
+}
+
+QImage GetImageFromClipboard() {
+	QImage data;
+
+#ifndef TDESKTOP_DISABLE_GTK_INTEGRATION
+	if (!App::wnd()->gtkClipboard()) {
+		return data;
+	}
+
+	auto gsel = Libs::gtk_clipboard_wait_for_contents(
+		App::wnd()->gtkClipboard(),
+		Libs::gdk_atom_intern("TARGETS", true));
+
+	if (gsel) {
+		if (Libs::gtk_selection_data_targets_include_image(gsel, false)) {
+			auto img = Libs::gtk_clipboard_wait_for_image(App::wnd()->gtkClipboard());
+
+			if (img) {
+				data = QImage(
+					Libs::gdk_pixbuf_get_pixels(img),
+					Libs::gdk_pixbuf_get_width(img),
+					Libs::gdk_pixbuf_get_height(img),
+					Libs::gdk_pixbuf_get_rowstride(img),
+					Libs::gdk_pixbuf_get_has_alpha(img)
+						? QImage::Format_RGBA8888
+						: QImage::Format_RGB888).copy();
+
+				Libs::g_object_unref(img);
+			}
+		}
+
+		Libs::gtk_selection_data_free(gsel);
+	}
+#endif // !TDESKTOP_DISABLE_GTK_INTEGRATION
+
+	return data;
 }
 
 std::optional<crl::time> LastUserInputTime() {
@@ -465,26 +567,31 @@ std::optional<crl::time> LastUserInputTime() {
 		return std::nullopt;
 	}
 
-	static const auto message = QDBusMessage::createMethodCall(
+	static const auto Message = QDBusMessage::createMethodCall(
 		qsl("org.freedesktop.ScreenSaver"),
 		qsl("/org/freedesktop/ScreenSaver"),
 		qsl("org.freedesktop.ScreenSaver"),
 		qsl("GetSessionIdleTime"));
 
 	const QDBusReply<uint> reply = QDBusConnection::sessionBus().call(
-		message);
+		Message);
 
-	const auto notSupportedErrors = {
+	static const auto NotSupportedErrors = {
 		QDBusError::ServiceUnknown,
 		QDBusError::NotSupported,
 	};
 
+	static const auto NotSupportedErrorsToLog = {
+		QDBusError::Disconnected,
+		QDBusError::AccessDenied,
+	};
+
 	if (reply.isValid()) {
 		return (crl::now() - static_cast<crl::time>(reply.value()));
-	} else if (ranges::contains(notSupportedErrors, reply.error().type())) {
+	} else if (ranges::contains(NotSupportedErrors, reply.error().type())) {
 		NotSupported = true;
 	} else {
-		if (reply.error().type() == QDBusError::AccessDenied) {
+		if (ranges::contains(NotSupportedErrorsToLog, reply.error().type())) {
 			NotSupported = true;
 		}
 
@@ -495,6 +602,13 @@ std::optional<crl::time> LastUserInputTime() {
 #endif // !TDESKTOP_DISABLE_DBUS_INTEGRATION
 
 	return std::nullopt;
+}
+
+bool AutostartSupported() {
+	// snap sandbox doesn't allow creating files in folders with names started with a dot
+	// and doesn't provide any api to add an app to autostart
+	// thus, autostart isn't supported in snap
+	return !InSnap();
 }
 
 void FallbackFontConfigCheckBegin() {
@@ -629,6 +743,9 @@ int psFixPrevious() {
 namespace Platform {
 
 void start() {
+	PlatformThemes = QString::fromUtf8(qgetenv("QT_QPA_PLATFORMTHEME"))
+		.split(':', QString::SkipEmptyParts);
+
 	LOG(("Launcher filename: %1").arg(GetLauncherFilename()));
 
 #ifdef TDESKTOP_USE_FONTCONFIG_FALLBACK
@@ -638,28 +755,39 @@ void start() {
 	qputenv("PULSE_PROP_application.name", AppName.utf8());
 	qputenv("PULSE_PROP_application.icon_name", GetIconName().toLatin1());
 
+	// if gtk integration and qgtk3/qgtk2 platformtheme (or qgtk2 style)
+	// is used at the same time, the app will crash
+	if (UseGtkIntegration()
+		&& !IsStaticBinary()
+		&& !qEnvironmentVariableIsSet(
+			"TDESKTOP_I_KNOW_ABOUT_GTK_INCOMPATIBILITY")) {
+		qunsetenv("QT_QPA_PLATFORMTHEME");
+		qunsetenv("QT_STYLE_OVERRIDE");
+	}
+
 	if(IsStaticBinary()
 		|| InAppImage()
-		|| InSandbox()
+		|| InFlatpak()
 		|| InSnap()
 		|| IsQtPluginsBundled()) {
 		qputenv("QT_WAYLAND_DECORATION", "material");
 	}
 
-	if(IsStaticBinary()
+	if((IsStaticBinary()
 		|| InAppImage()
 		|| InSnap()
-		|| IsGtkFileDialogForced()
-		|| IsQtPluginsBundled()) {
+		|| UseGtkFileDialog()
+		|| IsQtPluginsBundled())
+		&& !InFlatpak()) {
 		LOG(("Checking for XDG Desktop Portal..."));
 		// this can give us a chance to use a proper file dialog for current session
 		if (IsXDGDesktopPortalPresent()) {
 			LOG(("XDG Desktop Portal is present!"));
 			if (UseXDGDesktopPortal()) {
-				LOG(("Usage of XDG Desktop Portal is enabled."));
+				LOG(("Using XDG Desktop Portal."));
 				qputenv("QT_QPA_PLATFORMTHEME", "xdgdesktopportal");
 			} else {
-				LOG(("Usage of XDG Desktop Portal is disabled."));
+				LOG(("Not using XDG Desktop Portal."));
 			}
 		} else {
 			LOG(("XDG Desktop Portal is not present :("));
@@ -676,11 +804,11 @@ void RegisterCustomScheme(bool force) {
 	if (home.isEmpty() || cExeName().isEmpty())
 		return;
 
-	static const auto disabledByEnv = qEnvironmentVariableIsSet(
+	static const auto DisabledByEnv = qEnvironmentVariableIsSet(
 		"TDESKTOP_DISABLE_DESKTOP_FILE_GENERATION");
 
 	// don't update desktop file for alpha version or if updater is disabled
-	if ((cAlphaVersion() || Core::UpdaterDisabled() || disabledByEnv)
+	if ((cAlphaVersion() || Core::UpdaterDisabled() || DisabledByEnv)
 		&& !force)
 		return;
 
@@ -743,6 +871,8 @@ bool OpenSystemSettings(SystemSettingsType type) {
 			add("kcmshell4 phonon");
 		} else if (DesktopEnvironment::IsGnome()) {
 			add("gnome-control-center sound");
+		} else if (DesktopEnvironment::IsCinnamon()) {
+			add("cinnamon-settings sound");
 		} else if (DesktopEnvironment::IsMATE()) {
 			add("mate-volume-control");
 		}
@@ -783,9 +913,9 @@ void psAutoStart(bool start, bool silent) {
 	if (home.isEmpty() || cExeName().isEmpty())
 		return;
 
-	if (InSandbox()) {
+	if (InFlatpak()) {
 #ifndef TDESKTOP_DISABLE_DBUS_INTEGRATION
-		SandboxAutostart(start, silent);
+		PortalAutostart(start, silent);
 #endif // !TDESKTOP_DISABLE_DBUS_INTEGRATION
 	} else {
 		const auto autostart = [&] {
