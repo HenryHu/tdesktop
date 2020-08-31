@@ -11,12 +11,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/labels.h"
 #include "ui/wrap/padding_wrap.h"
 #include "lang/lang_keys.h"
+#include "core/application.h"
 #include "calls/calls_call.h"
 #include "calls/calls_instance.h"
-#include "calls/calls_panel.h"
+#include "calls/calls_signal_bars.h"
 #include "data/data_user.h"
+#include "data/data_changes.h"
 #include "main/main_session.h"
-#include "observer_peer.h"
 #include "boxes/abstract_box.h"
 #include "base/timer.h"
 #include "layout.h"
@@ -93,21 +94,24 @@ TopBar::TopBar(
 void TopBar::initControls() {
 	_mute->setClickedCallback([=] {
 		if (const auto call = _call.get()) {
-			call->setMute(!call->isMute());
+			call->setMuted(!call->muted());
 		}
 	});
-	setMuted(_call->isMute());
-	subscribe(_call->muteChanged(), [=](bool mute) {
-		setMuted(mute);
+	_call->mutedValue(
+	) | rpl::start_with_next([=](bool muted) {
+		setMuted(muted);
 		update();
-	});
-	subscribe(Notify::PeerUpdated(), Notify::PeerUpdatedHandler(Notify::PeerUpdate::Flag::NameChanged, [this](const Notify::PeerUpdate &update) {
-		if (auto call = _call.get()) {
-			if (update.peer == call->user()) {
-				updateInfoLabels();
-			}
-		}
-	}));
+	}, lifetime());
+
+	_call->user()->session().changes().peerUpdates(
+		Data::PeerUpdate::Flag::Name
+	) | rpl::filter([=](const Data::PeerUpdate &update) {
+		// _user may change for the same Panel.
+		return (_call != nullptr) && (update.peer == _call->user());
+	}) | rpl::start_with_next([=] {
+		updateInfoLabels();
+	}, lifetime());
+
 	setInfoLabels();
 	_info->setClickedCallback([=] {
 		if (const auto call = _call.get()) {
@@ -115,7 +119,7 @@ void TopBar::initControls() {
 				&& (_info->clickModifiers() & Qt::ControlModifier)) {
 				Ui::show(Box<DebugInfoBox>(_call));
 			} else {
-				call->user()->session().calls().showInfoPanel(call);
+				Core::App().calls().showInfoPanel(call);
 			}
 		}
 	});

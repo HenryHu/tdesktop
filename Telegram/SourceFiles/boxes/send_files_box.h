@@ -40,7 +40,9 @@ namespace Window {
 class SessionController;
 } // namespace Window
 
-enum class SendMenuType;
+namespace SendMenu {
+enum class Type;
+} // namespace SendMenu
 
 enum class SendFilesWay {
 	Album,
@@ -62,7 +64,7 @@ public:
 		CompressConfirm compressed,
 		SendLimit limit,
 		Api::SendType sendType,
-		SendMenuType sendMenuType);
+		SendMenu::Type sendMenuType);
 
 	void setConfirmedCallback(
 		Fn<void(
@@ -115,6 +117,7 @@ private:
 	void sendScheduled();
 	void captionResized();
 
+	void setupDragArea();
 	void setupTitleText();
 	void updateBoxSize();
 	void updateControlsGeometry();
@@ -141,7 +144,7 @@ private:
 	CompressConfirm _compressConfirmInitial = CompressConfirm::None;
 	CompressConfirm _compressConfirm = CompressConfirm::None;
 	SendLimit _sendLimit = SendLimit::Many;
-	SendMenuType _sendMenuType = SendMenuType();
+	SendMenu::Type _sendMenuType = SendMenu::Type();
 
 	Fn<void(
 		Storage::PreparedList &&list,
@@ -163,6 +166,7 @@ private:
 	std::shared_ptr<Ui::RadioenumGroup<SendFilesWay>> _sendWay;
 
 	rpl::variable<int> _footerHeight = 0;
+	rpl::event_stream<> _albumChanged;
 
 	QWidget *_preview = nullptr;
 	AlbumPreview *_albumPreview = nullptr;

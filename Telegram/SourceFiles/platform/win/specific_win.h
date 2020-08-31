@@ -22,14 +22,20 @@ inline void SetWatchingMediaKeys(bool watching) {
 inline void IgnoreApplicationActivationRightNow() {
 }
 
-inline void FallbackFontConfigCheckBegin() {
-}
-
-inline void FallbackFontConfigCheckEnd() {
-}
-
 inline QImage GetImageFromClipboard() {
 	return {};
+}
+
+inline bool StartSystemMove(QWindow *window) {
+	return false;
+}
+
+inline bool StartSystemResize(QWindow *window, Qt::Edges edges) {
+	return false;
+}
+
+inline bool TrayIconSupported() {
+	return true;
 }
 
 namespace ThirdParty {

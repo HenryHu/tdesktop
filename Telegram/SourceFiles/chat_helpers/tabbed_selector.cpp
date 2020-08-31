@@ -10,20 +10,24 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "chat_helpers/emoji_list_widget.h"
 #include "chat_helpers/stickers_list_widget.h"
 #include "chat_helpers/gifs_list_widget.h"
-#include "chat_helpers/stickers.h"
+#include "chat_helpers/send_context_menu.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/shadow.h"
 #include "ui/widgets/discrete_sliders.h"
+#include "ui/widgets/popup_menu.h"
 #include "ui/widgets/scroll_area.h"
 #include "ui/image/image_prepare.h"
 #include "window/window_session_controller.h"
+#include "main/main_session.h"
+#include "main/main_session_settings.h"
 #include "storage/localstorage.h"
 #include "data/data_channel.h"
 #include "data/data_session.h"
+#include "data/data_changes.h"
+#include "data/stickers/data_stickers.h"
 #include "lang/lang_keys.h"
 #include "mainwindow.h"
-#include "observer_peer.h"
 #include "apiwrap.h"
 #include "styles/style_chat_helpers.h"
 
@@ -333,7 +337,7 @@ TabbedSelector::TabbedSelector(
 
 	rpl::merge(
 		(full()
-			? stickers()->scrollUpdated() | rpl::map([] { return 0; })
+			? stickers()->scrollUpdated() | rpl::map_to(0)
 			: rpl::never<int>() | rpl::type_erased()),
 		_scroll->scrollTopChanges()
 	) | rpl::start_with_next([=] {
@@ -347,16 +351,13 @@ TabbedSelector::TabbedSelector(
 	if (full()) {
 		_tabsSlider->raise();
 
-		const auto handleUpdate = [=](const Notify::PeerUpdate &update) {
-			if (update.peer == _currentPeer) {
-				checkRestrictedPeer();
-			}
-		};
-		subscribe(
-			Notify::PeerUpdated(),
-			Notify::PeerUpdatedHandler(
-				Notify::PeerUpdate::Flag::RightsChanged,
-				handleUpdate));
+		session().changes().peerUpdates(
+			Data::PeerUpdate::Flag::Rights
+		) | rpl::filter([=](const Data::PeerUpdate &update) {
+			return (update.peer.get() == _currentPeer);
+		}) | rpl::start_with_next([=] {
+			checkRestrictedPeer();
+		}, lifetime());
 
 		session().api().stickerSetInstalled(
 		) | rpl::start_with_next([this](uint64 setId) {
@@ -366,10 +367,11 @@ TabbedSelector::TabbedSelector(
 			_showRequests.fire({});
 		}, lifetime());
 
-		session().data().stickersUpdated(
+		session().data().stickers().updated(
 		) | rpl::start_with_next([=] {
 			refreshStickers();
 		}, lifetime());
+		refreshStickers();
 	}
 	//setAttribute(Qt::WA_AcceptTouchEvents);
 	setAttribute(Qt::WA_OpaquePaintEvent, false);
@@ -409,13 +411,14 @@ rpl::producer<EmojiPtr> TabbedSelector::emojiChosen() const {
 	return emoji()->chosen();
 }
 
-rpl::producer<not_null<DocumentData*>> TabbedSelector::fileChosen() const {
+rpl::producer<TabbedSelector::FileChosen> TabbedSelector::fileChosen() const {
 	return full()
 		? rpl::merge(stickers()->chosen(), gifs()->fileChosen())
-		: rpl::never<not_null<DocumentData*>>() | rpl::type_erased();
+		: rpl::never<TabbedSelector::FileChosen>() | rpl::type_erased();
 }
 
-rpl::producer<not_null<PhotoData*>> TabbedSelector::photoChosen() const {
+auto TabbedSelector::photoChosen() const
+-> rpl::producer<TabbedSelector::PhotoChosen>{
 	return full() ? gifs()->photoChosen() : nullptr;
 }
 
@@ -584,7 +587,13 @@ void TabbedSelector::refreshStickers() {
 }
 
 bool TabbedSelector::preventAutoHide() const {
-	return full() ? stickers()->preventAutoHide() : false;
+	return full()
+		? (stickers()->preventAutoHide() || hasMenu())
+		: false;
+}
+
+bool TabbedSelector::hasMenu() const {
+	return (_menu && !_menu->actions().empty());
 }
 
 QImage TabbedSelector::grabForAnimation() {
@@ -609,11 +618,11 @@ QImage TabbedSelector::grabForAnimation() {
 	return result;
 }
 
-bool TabbedSelector::wheelEventFromFloatPlayer(QEvent *e) {
+bool TabbedSelector::floatPlayerHandleWheelEvent(QEvent *e) {
 	return _scroll->viewportEvent(e);
 }
 
-QRect TabbedSelector::rectForFloatPlayer() const {
+QRect TabbedSelector::floatPlayerAvailableRect() const {
 	return mapToGlobal(_scroll->geometry());
 }
 
@@ -867,6 +876,18 @@ void TabbedSelector::scrollToY(int y) {
 	}
 }
 
+void TabbedSelector::contextMenuEvent(QContextMenuEvent *e) {
+	_menu = base::make_unique_q<Ui::PopupMenu>(this);
+	const auto type = _sendMenuType
+		? _sendMenuType()
+		: SendMenu::Type::Disabled;
+	currentTab()->widget()->fillContextMenu(_menu, type);
+
+	if (!_menu->actions().empty()) {
+		_menu->popup(QCursor::pos());
+	}
+}
+
 TabbedSelector::Inner::Inner(
 	QWidget *parent,
 	not_null<Window::SessionController*> controller)
@@ -939,7 +960,7 @@ void TabbedSelector::Inner::panelHideFinished() {
 }
 
 TabbedSelector::InnerFooter::InnerFooter(QWidget *parent)
-: TWidget(parent) {
+: RpWidget(parent) {
 	resize(st::emojiPanWidth, st::emojiFooterHeight);
 }
 

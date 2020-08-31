@@ -8,7 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "chat_helpers/tabbed_selector.h"
-#include "chat_helpers/stickers.h"
+#include "data/stickers/data_stickers.h"
 #include "base/variant.h"
 #include "base/timer.h"
 
@@ -22,6 +22,7 @@ class SessionController;
 
 namespace Ui {
 class LinkButton;
+class PopupMenu;
 class RippleAnimation;
 class BoxContent;
 } // namespace Ui
@@ -34,11 +35,8 @@ class FrameRenderer;
 
 namespace Data {
 class DocumentMedia;
+class StickersSet;
 } // namespace Data
-
-namespace Stickers {
-class Set;
-} // namespace Stickers
 
 namespace ChatHelpers {
 
@@ -54,7 +52,7 @@ public:
 
 	Main::Session &session() const;
 
-	rpl::producer<not_null<DocumentData*>> chosen() const;
+	rpl::producer<TabbedSelector::FileChosen> chosen() const;
 	rpl::producer<> scrollUpdated() const;
 	rpl::producer<> checkForHide() const;
 
@@ -84,6 +82,10 @@ public:
 	void searchForSets(const QString &query);
 
 	std::shared_ptr<Lottie::FrameRenderer> getLottieRenderer();
+
+	void fillContextMenu(
+		not_null<Ui::PopupMenu*> menu,
+		SendMenu::Type type) override;
 
 	~StickersListWidget();
 
@@ -169,7 +171,7 @@ private:
 	struct Set {
 		Set(
 			uint64 id,
-			Stickers::Set *set,
+			Data::StickersSet *set,
 			MTPDstickerSet::Flags flags,
 			const QString &title,
 			const QString &shortName,
@@ -181,7 +183,7 @@ private:
 		~Set();
 
 		uint64 id = 0;
-		Stickers::Set *set = nullptr;
+		Data::StickersSet *set = nullptr;
 		MTPDstickerSet::Flags flags = MTPDstickerSet::Flags();
 		QString title;
 		QString shortName;
@@ -301,6 +303,8 @@ private:
 	void setColumnCount(int count);
 	void refreshFooterIcons();
 
+	void showStickerSetBox(not_null<DocumentData*> document);
+
 	void cancelSetsSearch();
 	void showSearchResults();
 	void searchResultsDone(const MTPmessages_FoundStickerSets &result);
@@ -308,7 +312,7 @@ private:
 	void refreshSearchRows(const std::vector<uint64> *cloudSets);
 	void fillLocalSearchRows(const QString &query);
 	void fillCloudSearchRows(const std::vector<uint64> &cloudSets);
-	void addSearchRow(not_null<Stickers::Set*> set);
+	void addSearchRow(not_null<Data::StickersSet*> set);
 
 	void showPreview();
 
@@ -361,7 +365,7 @@ private:
 	QString _searchQuery, _searchNextQuery;
 	mtpRequestId _searchRequestId = 0;
 
-	rpl::event_stream<not_null<DocumentData*>> _chosen;
+	rpl::event_stream<TabbedSelector::FileChosen> _chosen;
 	rpl::event_stream<> _scrollUpdated;
 	rpl::event_stream<> _checkForHide;
 

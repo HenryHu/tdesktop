@@ -29,7 +29,7 @@ Go to ***BuildPath*** and run
 
     git clone https://github.com/desktop-app/patches.git
     cd patches
-    git checkout 0ba67e2
+    git checkout ddd4084
     cd ../
     git clone https://chromium.googlesource.com/external/gyp
     git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
@@ -43,12 +43,20 @@ Go to ***BuildPath*** and run
 
     mkdir -p Libraries/macos
     cd Libraries/macos
-    LibrariesPath=`pwd`
 
     git clone https://github.com/desktop-app/patches.git
     cd patches
-    git checkout b08b497
+    git checkout ddd4084
     cd ..
+
+    git clone https://git.tukaani.org/xz.git
+    cd xz
+    git checkout v5.2.5
+    mkdir build
+    cd build
+    CFLAGS="$UNGUARDED" CPPFLAGS="$UNGUARDED" cmake -D CMAKE_OSX_DEPLOYMENT_TARGET:STRING=10.12 -D CMAKE_INSTALL_PREFIX:STRING=/usr/local/macos ..
+    make $MAKE_THREADS_CNT
+    cd ../..
 
     xz_ver=5.2.4
     wget https://tukaani.org/xz/xz-$xz_ver.tar.gz
@@ -70,7 +78,7 @@ Go to ***BuildPath*** and run
     git clone https://github.com/openssl/openssl openssl_1_1_1
     cd openssl_1_1_1
     git checkout OpenSSL_1_1_1-stable
-    ./Configure --prefix=/usr/local/macos darwin64-x86_64-cc -static $MIN_VER
+    ./Configure --prefix=/usr/local/macos no-tests darwin64-x86_64-cc -static $MIN_VER
     make build_libs $MAKE_THREADS_CNT
     cd ..
 
@@ -234,8 +242,8 @@ Go to ***BuildPath*** and run
     ninja -C out/Release
     cd ..
 
-    git clone git://code.qt.io/qt/qt5.git qt5_12_8
-    cd qt5_12_8
+    git clone git://code.qt.io/qt/qt5.git qt_5_12_8
+    cd qt_5_12_8
     perl init-repository --module-subset=qtbase,qtimageformats
     git checkout v5.12.8
     git submodule update qtbase qtimageformats
@@ -259,6 +267,33 @@ Go to ***BuildPath*** and run
     make $MAKE_THREADS_CNT
     sudo make install
     cd ..
+
+    git clone https://github.com/desktop-app/tg_owt.git
+    cd tg_owt
+    mkdir out
+    cd out
+    mkdir Debug
+    cd Debug
+    cmake -G Ninja \
+    -DCMAKE_BUILD_TYPE=Debug \
+    -DTG_OWT_SPECIAL_TARGET=mac \
+    -DTG_OWT_LIBJPEG_INCLUDE_PATH=`pwd`/../../../qt_5_12_8/qtbase/src/3rdparty/libjpeg \
+    -DTG_OWT_OPENSSL_INCLUDE_PATH=`pwd`/../../../openssl_1_1_1/include \
+    -DTG_OWT_OPUS_INCLUDE_PATH=/usr/local/macos/include/opus \
+    -DTG_OWT_FFMPEG_INCLUDE_PATH=/usr/local/macos/include ../..
+    ninja
+    cd ..
+    mkdir Release
+    cd Release
+    cmake -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DTG_OWT_SPECIAL_TARGET=mac \
+    -DTG_OWT_LIBJPEG_INCLUDE_PATH=`pwd`/../../../qt_5_12_8/qtbase/src/3rdparty/libjpeg \
+    -DTG_OWT_OPENSSL_INCLUDE_PATH=`pwd`/../../../openssl_1_1_1/include \
+    -DTG_OWT_OPUS_INCLUDE_PATH=/usr/local/macos/include/opus \
+    -DTG_OWT_FFMPEG_INCLUDE_PATH=/usr/local/macos/include ../..
+    ninja
+    cd ../../..
 
 ### Building the project
 

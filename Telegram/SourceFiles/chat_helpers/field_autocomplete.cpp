@@ -14,14 +14,21 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_user.h"
 #include "data/data_peer_values.h"
 #include "data/data_file_origin.h"
+#include "data/data_session.h"
+#include "data/stickers/data_stickers.h"
+#include "chat_helpers/send_context_menu.h" // SendMenu::FillSendMenu
+#include "chat_helpers/stickers_lottie.h"
 #include "mainwindow.h"
 #include "apiwrap.h"
-#include "storage/localstorage.h"
+#include "main/main_session.h"
+#include "storage/storage_account.h"
+#include "core/application.h"
+#include "core/core_settings.h"
 #include "lottie/lottie_single_player.h"
+#include "ui/widgets/popup_menu.h"
 #include "ui/widgets/scroll_area.h"
 #include "ui/image/image.h"
 #include "ui/ui_utility.h"
-#include "chat_helpers/stickers.h"
 #include "base/unixtime.h"
 #include "window/window_session_controller.h"
 #include "facades.h"
@@ -40,8 +47,10 @@ FieldAutocomplete::FieldAutocomplete(
 , _scroll(this, st::mentionScroll) {
 	_scroll->setGeometry(rect());
 
+	using Inner = internal::FieldAutocompleteInner;
+
 	_inner = _scroll->setOwnedWidget(
-		object_ptr<internal::FieldAutocompleteInner>(
+		object_ptr<Inner>(
 			_controller,
 			this,
 			&_mrows,
@@ -50,18 +59,41 @@ FieldAutocomplete::FieldAutocomplete(
 			&_srows));
 	_inner->setGeometry(rect());
 
-	connect(_inner, SIGNAL(mentionChosen(not_null<UserData*>,FieldAutocomplete::ChooseMethod)), this, SIGNAL(mentionChosen(not_null<UserData*>,FieldAutocomplete::ChooseMethod)));
-	connect(_inner, SIGNAL(hashtagChosen(QString,FieldAutocomplete::ChooseMethod)), this, SIGNAL(hashtagChosen(QString,FieldAutocomplete::ChooseMethod)));
-	connect(_inner, SIGNAL(botCommandChosen(QString,FieldAutocomplete::ChooseMethod)), this, SIGNAL(botCommandChosen(QString,FieldAutocomplete::ChooseMethod)));
-	connect(_inner, SIGNAL(stickerChosen(not_null<DocumentData*>,FieldAutocomplete::ChooseMethod)), this, SIGNAL(stickerChosen(not_null<DocumentData*>,FieldAutocomplete::ChooseMethod)));
-	connect(_inner, SIGNAL(mustScrollTo(int, int)), _scroll, SLOT(scrollToY(int, int)));
+	_inner->scrollToRequested(
+	) | rpl::start_with_next([=](Inner::ScrollTo data) {
+		_scroll->scrollToY(data.top, data.bottom);
+	}, lifetime());
 
 	_scroll->show();
 	_inner->show();
 
 	hide();
 
-	connect(_scroll, SIGNAL(geometryChanged()), _inner, SLOT(onParentGeometryChanged()));
+	connect(
+		_scroll,
+		&Ui::ScrollArea::geometryChanged,
+		_inner,
+		&Inner::onParentGeometryChanged);
+}
+
+auto FieldAutocomplete::mentionChosen() const
+-> rpl::producer<FieldAutocomplete::MentionChosen> {
+	return _inner->mentionChosen();
+}
+
+auto FieldAutocomplete::hashtagChosen() const
+-> rpl::producer<FieldAutocomplete::HashtagChosen> {
+	return _inner->hashtagChosen();
+}
+
+auto FieldAutocomplete::botCommandChosen() const
+-> rpl::producer<FieldAutocomplete::BotCommandChosen> {
+	return _inner->botCommandChosen();
+}
+
+auto FieldAutocomplete::stickerChosen() const
+-> rpl::producer<FieldAutocomplete::StickerChosen> {
+	return _inner->stickerChosen();
 }
 
 FieldAutocomplete::~FieldAutocomplete() = default;
@@ -172,8 +204,7 @@ inline int indexOfInFirstN(const T &v, const U &elem, int last) {
 }
 
 internal::StickerRows FieldAutocomplete::getStickerSuggestions() {
-	const auto list = Stickers::GetListByEmoji(
-		&_controller->session(),
+	const auto list = _controller->session().data().stickers().getListByEmoji(
 		_emoji,
 		_stickersSeed
 	);
@@ -254,7 +285,7 @@ void FieldAutocomplete::updateFiltered(bool resetScroll) {
 			};
 			mrows.reserve(mrows.size() + (_chat->participants.empty() ? _chat->lastAuthors.size() : _chat->participants.size()));
 			if (_chat->noParticipantInfo()) {
-				Auth().api().requestFullPeer(_chat);
+				_chat->session().api().requestFullPeer(_chat);
 			} else if (!_chat->participants.empty()) {
 				for (const auto user : _chat->participants) {
 					if (user->isInaccessible()) continue;
@@ -277,7 +308,7 @@ void FieldAutocomplete::updateFiltered(bool resetScroll) {
 		} else if (_channel && _channel->isMegagroup()) {
 			QMultiMap<int32, UserData*> ordered;
 			if (_channel->lastParticipantsRequestNeeded()) {
-				Auth().api().requestLastParticipants(_channel);
+				_channel->session().api().requestLastParticipants(_channel);
 			} else {
 				mrows.reserve(mrows.size() + _channel->mgInfo->lastParticipants.size());
 				for (const auto user : _channel->mgInfo->lastParticipants) {
@@ -561,23 +592,28 @@ bool FieldAutocomplete::chooseSelected(ChooseMethod method) const {
 
 bool FieldAutocomplete::eventFilter(QObject *obj, QEvent *e) {
 	auto hidden = isHidden();
-	auto moderate = Global::ModerateModeEnabled();
+	auto moderate = Core::App().settings().moderateModeEnabled();
 	if (hidden && !moderate) return QWidget::eventFilter(obj, e);
 
 	if (e->type() == QEvent::KeyPress) {
 		QKeyEvent *ev = static_cast<QKeyEvent*>(e);
 		if (!(ev->modifiers() & (Qt::AltModifier | Qt::ControlModifier | Qt::ShiftModifier | Qt::MetaModifier))) {
+			const auto key = ev->key();
 			if (!hidden) {
-				if (ev->key() == Qt::Key_Up || ev->key() == Qt::Key_Down || (!_srows.empty() && (ev->key() == Qt::Key_Left || ev->key() == Qt::Key_Right))) {
-					return _inner->moveSel(ev->key());
-				} else if (ev->key() == Qt::Key_Enter || ev->key() == Qt::Key_Return) {
+				if (key == Qt::Key_Up || key == Qt::Key_Down || (!_srows.empty() && (key == Qt::Key_Left || key == Qt::Key_Right))) {
+					return _inner->moveSel(key);
+				} else if (key == Qt::Key_Enter || key == Qt::Key_Return) {
 					return _inner->chooseSelected(ChooseMethod::ByEnter);
 				}
 			}
-			if (moderate && ((ev->key() >= Qt::Key_1 && ev->key() <= Qt::Key_9) || ev->key() == Qt::Key_Q)) {
-				bool handled = false;
-				emit moderateKeyActivate(ev->key(), &handled);
-				return handled;
+			if (moderate
+				&& ((key >= Qt::Key_1 && key <= Qt::Key_9)
+					|| key == Qt::Key_Q
+					|| key == Qt::Key_W)) {
+
+				return _moderateKeyActivateCallback
+					? _moderateKeyActivateCallback(key)
+					: false;
 			}
 		}
 	}
@@ -600,7 +636,10 @@ FieldAutocompleteInner::FieldAutocompleteInner(
 , _brows(brows)
 , _srows(srows)
 , _previewTimer([=] { showPreview(); }) {
-	subscribe(Auth().downloaderTaskFinished(), [this] { update(); });
+	controller->session().downloaderTaskFinished(
+	) | rpl::start_with_next([=] {
+		update();
+	}, lifetime());
 }
 
 void FieldAutocompleteInner::paintEvent(QPaintEvent *e) {
@@ -609,8 +648,6 @@ void FieldAutocompleteInner::paintEvent(QPaintEvent *e) {
 	QRect r(e->rect());
 	if (r != rect()) p.setClipRect(r);
 
-	auto atwidth = st::mentionFont->width('@');
-	auto hashwidth = st::mentionFont->width('#');
 	auto mentionleft = 2 * st::mentionPadding.left() + st::mentionPhotoSize;
 	auto mentionwidth = width()
 		- mentionleft
@@ -866,32 +903,52 @@ bool FieldAutocompleteInner::moveSel(int key) {
 	return true;
 }
 
-bool FieldAutocompleteInner::chooseSelected(FieldAutocomplete::ChooseMethod method) const {
+bool FieldAutocompleteInner::chooseSelected(
+		FieldAutocomplete::ChooseMethod method) const {
+	return chooseAtIndex(method, _sel);
+}
+
+bool FieldAutocompleteInner::chooseAtIndex(
+		FieldAutocomplete::ChooseMethod method,
+		int index,
+		Api::SendOptions options) const {
+	if (index < 0) {
+		return false;
+	}
 	if (!_srows->empty()) {
-		if (_sel >= 0 && _sel < _srows->size()) {
-			emit stickerChosen((*_srows)[_sel].document, method);
+		if (index < _srows->size()) {
+			const auto document = (*_srows)[index].document;
+			_stickerChosen.fire({ document, options, method });
 			return true;
 		}
 	} else if (!_mrows->empty()) {
-		if (_sel >= 0 && _sel < _mrows->size()) {
-			emit mentionChosen(_mrows->at(_sel).user, method);
+		if (index < _mrows->size()) {
+			_mentionChosen.fire({ _mrows->at(index).user, method });
 			return true;
 		}
 	} else if (!_hrows->empty()) {
-		if (_sel >= 0 && _sel < _hrows->size()) {
-			emit hashtagChosen('#' + _hrows->at(_sel), method);
+		if (index < _hrows->size()) {
+			_hashtagChosen.fire({ '#' + _hrows->at(index), method });
 			return true;
 		}
 	} else if (!_brows->empty()) {
-		if (_sel >= 0 && _sel < _brows->size()) {
-			const auto user = _brows->at(_sel).user;
-			const auto command = _brows->at(_sel).command;
-			int32 botStatus = _parent->chat() ? _parent->chat()->botStatus : ((_parent->channel() && _parent->channel()->isMegagroup()) ? _parent->channel()->mgInfo->botStatus : -1);
-			if (botStatus == 0 || botStatus == 2 || _parent->filter().indexOf('@') > 0) {
-				emit botCommandChosen('/' + command->command + '@' + user->username, method);
-			} else {
-				emit botCommandChosen('/' + command->command, method);
-			}
+		if (index < _brows->size()) {
+			const auto user = _brows->at(index).user;
+			const auto command = _brows->at(index).command;
+			const auto botStatus = _parent->chat()
+				? _parent->chat()->botStatus
+				: ((_parent->channel() && _parent->channel()->isMegagroup())
+					? _parent->channel()->mgInfo->botStatus
+					: -1);
+
+			const auto insertUsername = (botStatus == 0
+				|| botStatus == 2
+				|| _parent->filter().indexOf('@') > 0);
+			const auto commandString = QString("/%1%2")
+				.arg(command->command)
+				.arg(insertUsername ? ('@' + user->username) : QString());
+
+			_botCommandChosen.fire({ commandString, method });
 			return true;
 		}
 	}
@@ -928,7 +985,7 @@ void FieldAutocompleteInner::mousePressEvent(QMouseEvent *e) {
 				}
 			}
 			if (removed) {
-				Local::writeRecentHashtagsAndBots();
+				_controller->session().local().writeRecentHashtagsAndBots();
 			}
 			_parent->updateFiltered();
 
@@ -958,6 +1015,29 @@ void FieldAutocompleteInner::mouseReleaseEvent(QMouseEvent *e) {
 	if (_sel < 0 || _sel != pressed || _srows->empty()) return;
 
 	chooseSelected(FieldAutocomplete::ChooseMethod::ByClick);
+}
+
+void FieldAutocompleteInner::contextMenuEvent(QContextMenuEvent *e) {
+	if (_sel < 0 || _srows->empty() || _down >= 0) {
+		return;
+	}
+	const auto index = _sel;
+	const auto type = SendMenu::Type::Scheduled;
+	const auto method = FieldAutocomplete::ChooseMethod::ByClick;
+	_menu = base::make_unique_q<Ui::PopupMenu>(this);
+
+	const auto send = [=](Api::SendOptions options) {
+		chooseAtIndex(method, index, options);
+	};
+	SendMenu::FillSendMenu(
+		_menu,
+		[&] { return type; },
+		SendMenu::DefaultSilentCallback(send),
+		SendMenu::DefaultScheduleCallback(this, type, send));
+
+	if (!_menu->actions().empty()) {
+		_menu->popup(QCursor::pos());
+	}
 }
 
 void FieldAutocompleteInner::enterEventHook(QEvent *e) {
@@ -991,10 +1071,15 @@ void FieldAutocompleteInner::setSel(int sel, bool scroll) {
 
 	if (scroll && _sel >= 0) {
 		if (_srows->empty()) {
-			emit mustScrollTo(_sel * st::mentionHeight, (_sel + 1) * st::mentionHeight);
+			_scrollToRequested.fire({
+				_sel * st::mentionHeight,
+				(_sel + 1) * st::mentionHeight });
 		} else {
 			int32 row = _sel / _stickersPerRow;
-			emit mustScrollTo(st::stickerPanPadding + row * st::stickerPanSize.height(), st::stickerPanPadding + (row + 1) * st::stickerPanSize.height());
+			const auto padding = st::stickerPanPadding;
+			_scrollToRequested.fire({
+				padding + row * st::stickerPanSize.height(),
+				padding + (row + 1) * st::stickerPanSize.height() });
 		}
 	}
 }
@@ -1017,9 +1102,9 @@ auto FieldAutocompleteInner::getLottieRenderer()
 
 void FieldAutocompleteInner::setupLottie(StickerSuggestion &suggestion) {
 	const auto document = suggestion.document;
-	suggestion.animated = Stickers::LottiePlayerFromDocument(
+	suggestion.animated = ChatHelpers::LottiePlayerFromDocument(
 		suggestion.documentMedia.get(),
-		Stickers::LottieSize::InlineResults,
+		ChatHelpers::StickerLottieSize::InlineResults,
 		stickerBoundingBox() * cIntRetinaFactor(),
 		Lottie::Quality::Default,
 		getLottieRenderer());
@@ -1120,6 +1205,31 @@ void FieldAutocompleteInner::showPreview() {
 			_previewShown = true;
 		}
 	}
+}
+
+auto FieldAutocompleteInner::mentionChosen() const
+-> rpl::producer<FieldAutocomplete::MentionChosen> {
+	return _mentionChosen.events();
+}
+
+auto FieldAutocompleteInner::hashtagChosen() const
+-> rpl::producer<FieldAutocomplete::HashtagChosen> {
+	return _hashtagChosen.events();
+}
+
+auto FieldAutocompleteInner::botCommandChosen() const
+-> rpl::producer<FieldAutocomplete::BotCommandChosen> {
+	return _botCommandChosen.events();
+}
+
+auto FieldAutocompleteInner::stickerChosen() const
+-> rpl::producer<FieldAutocomplete::StickerChosen> {
+	return _stickerChosen.events();
+}
+
+auto FieldAutocompleteInner::scrollToRequested() const
+-> rpl::producer<ScrollTo> {
+	return _scrollToRequested.events();
 }
 
 } // namespace internal

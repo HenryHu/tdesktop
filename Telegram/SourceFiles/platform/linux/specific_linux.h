@@ -26,15 +26,11 @@ bool InAppImage();
 bool IsStaticBinary();
 bool UseGtkIntegration();
 bool IsGtkIntegrationForced();
-bool UseGtkFileDialog();
 bool IsQtPluginsBundled();
 
 bool IsXDGDesktopPortalPresent();
 bool UseXDGDesktopPortal();
 bool CanOpenDirectoryWithPortal();
-
-QString ProcessNameByPID(const QString &pid);
-QString RealExecutablePath(int argc, char *argv[]);
 
 QString AppRuntimeDirectory();
 
@@ -46,8 +42,8 @@ QString GetIconName();
 inline void IgnoreApplicationActivationRightNow() {
 }
 
-void FallbackFontConfigCheckBegin();
-void FallbackFontConfigCheckEnd();
+void SetTrayIconSupported(bool supported);
+void InstallMainDesktopFile();
 
 } // namespace Platform
 

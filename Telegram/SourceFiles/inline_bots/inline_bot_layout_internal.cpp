@@ -13,10 +13,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_file_origin.h"
 #include "data/data_photo_media.h"
 #include "data/data_document_media.h"
-#include "styles/style_overview.h"
-#include "styles/style_history.h"
-#include "styles/style_chat_helpers.h"
-#include "styles/style_widgets.h"
+#include "data/stickers/data_stickers.h"
+#include "chat_helpers/gifs_list_widget.h" // ChatHelpers::DeleteSavedGif
+#include "chat_helpers/stickers_lottie.h"
 #include "inline_bots/inline_bot_result.h"
 #include "lottie/lottie_single_player.h"
 #include "media/audio/media_audio.h"
@@ -24,13 +23,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/player/media_player_instance.h"
 #include "history/history_location_manager.h"
 #include "history/view/history_view_cursor_state.h"
-#include "storage/localstorage.h"
-#include "chat_helpers/stickers.h"
 #include "ui/image/image.h"
 #include "main/main_session.h"
-#include "apiwrap.h"
 #include "lang/lang_keys.h"
 #include "app.h"
+#include "styles/style_overview.h"
+#include "styles/style_history.h"
+#include "styles/style_chat_helpers.h"
+#include "styles/style_widgets.h"
 
 namespace InlineBots {
 namespace Layout {
@@ -125,14 +125,7 @@ void Gif::setPosition(int32 position) {
 }
 
 void DeleteSavedGifClickHandler::onClickImpl() const {
-	Auth().api().toggleSavedGif(_data, Data::FileOriginSavedGifs(), false);
-
-	const auto index = Auth().data().savedGifs().indexOf(_data);
-	if (index >= 0) {
-		Auth().data().savedGifsRef().remove(index);
-		Local::writeSavedGifs();
-	}
-	Auth().data().notifySavedGifsUpdated();
+	ChatHelpers::DeleteSavedGif(_data);
 }
 
 int Gif::resizeGetHeight(int width) {
@@ -523,9 +516,9 @@ QSize Sticker::getThumbSize() const {
 void Sticker::setupLottie() const {
 	Expects(_dataMedia != nullptr);
 
-	_lottie = Stickers::LottiePlayerFromDocument(
+	_lottie = ChatHelpers::LottiePlayerFromDocument(
 		_dataMedia.get(),
-		Stickers::LottieSize::InlineResults,
+		ChatHelpers::StickerLottieSize::InlineResults,
 		QSize(
 			st::stickerPanSize.width() - st::buttonRadius * 2,
 			st::stickerPanSize.height() - st::buttonRadius * 2

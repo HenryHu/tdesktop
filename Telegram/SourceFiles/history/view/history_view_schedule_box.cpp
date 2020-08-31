@@ -20,7 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/wrap/padding_wrap.h"
-#include "chat_helpers/message_field.h"
+#include "chat_helpers/send_context_menu.h"
 #include "styles/style_info.h"
 #include "styles/style_layers.h"
 #include "styles/style_history.h"
@@ -603,10 +603,10 @@ bool CanScheduleUntilOnline(not_null<PeerData*> peer) {
 
 void ScheduleBox(
 		not_null<Ui::GenericBox*> box,
-		SendMenuType type,
-		FnMut<void(Api::SendOptions)> done,
+		SendMenu::Type type,
+		Fn<void(Api::SendOptions)> done,
 		TimeId time) {
-	box->setTitle((type == SendMenuType::Reminder)
+	box->setTitle((type == SendMenu::Type::Reminder)
 		? tr::lng_remind_title()
 		: tr::lng_schedule_title());
 	box->setWidth(st::boxWideWidth);
@@ -697,8 +697,6 @@ void ScheduleBox(
 		}), (*calendar)->lifetime());
 	});
 
-	const auto shared = std::make_shared<FnMut<void(Api::SendOptions)>>(
-		std::move(done));
 	const auto collect = [=] {
 		const auto timeValue = timeInput->valueCurrent().split(':');
 		if (timeValue.size() != 2) {
@@ -731,9 +729,9 @@ void ScheduleBox(
 			return;
 		}
 
-		auto copy = shared;
+		auto copy = done;
 		box->closeBox();
-		(*copy)(result);
+		copy(result);
 	};
 	timeInput->submitRequests(
 	) | rpl::start_with_next([=] {
@@ -744,14 +742,14 @@ void ScheduleBox(
 	const auto submit = box->addButton(tr::lng_schedule_button(), [=] {
 		save(false);
 	});
-	SetupSendMenuAndShortcuts(
+	SendMenu::SetupMenuAndShortcuts(
 		submit.data(),
-		[=] { return SendMenuType::SilentOnly; },
+		[=] { return SendMenu::Type::SilentOnly; },
 		[=] { save(true); },
 		nullptr);
 	box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
 
-	if (type == SendMenuType::ScheduledToUser) {
+	if (type == SendMenu::Type::ScheduledToUser) {
 		const auto sendUntilOnline = box->addTopButton(st::infoTopBarMenu);
 		FillSendUntilOnlineMenu(
 			sendUntilOnline.data(),

@@ -12,8 +12,6 @@ You will require **api_id** and **api_hash** to access the Telegram API servers.
 
 ### Download libraries
 
-Download [**xz-5.0.5**](http://tukaani.org/xz/xz-5.0.5.tar.gz) and unpack to ***BuildPath*/Libraries/xz-5.0.5**
-
 Download [**libiconv-1.15**](http://www.gnu.org/software/libiconv/#downloading) and unpack to ***BuildPath*/Libraries/libiconv-1.15**
 
 ### Clone source code and prepare libraries
@@ -35,7 +33,7 @@ Go to ***BuildPath*** and run
 
     git clone https://github.com/desktop-app/patches.git
     cd patches
-    git checkout b08b497
+    git checkout 7df6fdd
     cd ../
     git clone https://chromium.googlesource.com/external/gyp
     git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
@@ -48,18 +46,20 @@ Go to ***BuildPath*** and run
     cd ../..
 
     cd Libraries
-    LibrariesPath=`pwd`
 
     git clone https://github.com/desktop-app/patches.git
     cd patches
-    git checkout b08b497
+    git checkout 7df6fdd
     cd ../
 
-    cd xz-5.0.5
-    CFLAGS="-mmacosx-version-min=10.10" LDFLAGS="-mmacosx-version-min=10.10" ./configure
+    git clone https://git.tukaani.org/xz.git
+    cd xz
+    git checkout v5.2.5
+    mkdir build
+    cd build
+    CFLAGS='-Werror=unguarded-availability-new' CPPFLAGS='-Werror=unguarded-availability-new' cmake -D CMAKE_OSX_DEPLOYMENT_TARGET:STRING=10.10 ..
     make $MAKE_THREADS_CNT
-    sudo make install
-    cd ..
+    cd ../..
 
     git clone https://github.com/desktop-app/zlib.git
     cd zlib
@@ -68,10 +68,10 @@ Go to ***BuildPath*** and run
     sudo make install
     cd ..
 
-    git clone https://github.com/openssl/openssl
-    cd openssl
-    git checkout OpenSSL_1_0_1-stable
-    ./Configure darwin64-x86_64-cc -static -mmacosx-version-min=10.10
+    git clone https://github.com/openssl/openssl openssl_1_1_1
+    cd openssl_1_1_1
+    git checkout OpenSSL_1_1_1-stable
+    ./Configure --prefix=/usr/local/macos no-tests darwin64-x86_64-cc -static $MIN_VER
     make build_libs $MAKE_THREADS_CNT
     cd ..
 
@@ -245,11 +245,38 @@ Go to ***BuildPath*** and run
     sudo make install
     cd ..
 
+    git clone https://github.com/desktop-app/tg_owt.git
+    cd tg_owt
+    mkdir out
+    cd out
+    mkdir Debug
+    cd Debug
+    cmake -G Ninja \
+    -DCMAKE_BUILD_TYPE=Debug \
+    -DTG_OWT_SPECIAL_TARGET=osx \
+    -DTG_OWT_LIBJPEG_INCLUDE_PATH=`pwd`/../../../qt5_6_2/qtbase/src/3rdparty/libjpeg \
+    -DTG_OWT_OPENSSL_INCLUDE_PATH=`pwd`/../../../openssl_1_1_1/include \
+    -DTG_OWT_OPUS_INCLUDE_PATH=/usr/local/include/opus \
+    -DTG_OWT_FFMPEG_INCLUDE_PATH=`pwd`/../../../ffmpeg ../..
+    ninja
+    cd ..
+    mkdir Release
+    cd Release
+    cmake -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DTG_OWT_SPECIAL_TARGET=osx \
+    -DTG_OWT_LIBJPEG_INCLUDE_PATH=`pwd`/../../../qt5_6_2/qtbase/src/3rdparty/libjpeg \
+    -DTG_OWT_OPENSSL_INCLUDE_PATH=`pwd`/../../../openssl_1_1_1/include \
+    -DTG_OWT_OPUS_INCLUDE_PATH=/usr/local/include/opus \
+    -DTG_OWT_FFMPEG_INCLUDE_PATH=`pwd`/../../../ffmpeg ../..
+    ninja
+    cd ../../..
+
 ### Building the project
 
 Go to ***BuildPath*/tdesktop/Telegram** and run (using [your **api_id** and **api_hash**](#obtain-your-api-credentials))
 
-    ./configure.sh -D TDESKTOP_API_ID=YOUR_API_ID -D TDESKTOP_API_HASH=YOUR_API_HASH -D DESKTOP_APP_USE_PACKAGED=OFF
+    ./configure.sh -D TDESKTOP_API_ID=YOUR_API_ID -D TDESKTOP_API_HASH=YOUR_API_HASH -D DESKTOP_APP_USE_PACKAGED=OFF -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF
 
 Then launch Xcode, open ***BuildPath*/tdesktop/out/Telegram.xcodeproj** and build for Debug / Release.
 

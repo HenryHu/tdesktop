@@ -13,7 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/details/mtproto_rsa_public_key.h"
 #include "mtproto/session.h"
 #include "mtproto/mtproto_rpc_sender.h"
-#include "mtproto/dc_options.h"
+#include "mtproto/mtproto_dc_options.h"
 #include "mtproto/connection_abstract.h"
 #include "base/openssl_help.h"
 #include "base/qthelp_url.h"
@@ -107,6 +107,19 @@ void WrapInvokeAfter(
 	}
 }
 
+[[nodiscard]] bool ConstTimeIsDifferent(
+		const void *a,
+		const void *b,
+		size_t size) {
+	auto ca = reinterpret_cast<const char*>(a);
+	auto cb = reinterpret_cast<const char*>(b);
+	volatile auto different = false;
+	for (const auto ce = ca + size; ca != ce; ++ca, ++cb) {
+		different |= (*ca != *cb);
+	}
+	return different;
+}
+
 } // namespace
 
 SessionPrivate::SessionPrivate(
@@ -117,7 +130,7 @@ SessionPrivate::SessionPrivate(
 : QObject(nullptr)
 , _instance(instance)
 , _shiftedDcId(shiftedDcId)
-, _realDcType(_instance->dcOptions()->dcType(_shiftedDcId))
+, _realDcType(_instance->dcOptions().dcType(_shiftedDcId))
 , _currentDcType(_realDcType)
 , _state(DisconnectedState)
 , _retryTimer(thread, [=] { retryByTimer(); })
@@ -203,7 +216,7 @@ int16 SessionPrivate::getProtocolDcId() const {
 	const auto simpleDcId = isTemporaryDcId(dcId)
 		? getRealIdFromTemporaryDcId(dcId)
 		: dcId;
-	const auto testedDcId = cTestMode()
+	const auto testedDcId = _instance->isTestMode()
 		? (kTestModeDcIdShift + simpleDcId)
 		: simpleDcId;
 	return (_currentDcType == DcType::MediaCluster)
@@ -374,7 +387,7 @@ uint32 SessionPrivate::nextRequestSeqNumber(bool needAck) {
 }
 
 bool SessionPrivate::realDcTypeChanged() {
-	const auto now = _instance->dcOptions()->dcType(_shiftedDcId);
+	const auto now = _instance->dcOptions().dcType(_shiftedDcId);
 	if (_realDcType == now) {
 		return false;
 	}
@@ -936,7 +949,7 @@ void SessionPrivate::connectToServer(bool afterConfig) {
 
 	_currentDcType = tryAcquireKeyCreation();
 	if (_currentDcType == DcType::Cdn && !_instance->isKeysDestroyer()) {
-		if (!_instance->dcOptions()->hasCDNKeysForDc(bareDc)) {
+		if (!_instance->dcOptions().hasCDNKeysForDc(bareDc)) {
 			requestCDNConfig();
 			return;
 		}
@@ -947,7 +960,7 @@ void SessionPrivate::connectToServer(bool afterConfig) {
 	} else {
 		using Variants = DcOptions::Variants;
 		const auto special = (_currentDcType == DcType::Temporary);
-		const auto variants = _instance->dcOptions()->lookup(
+		const auto variants = _instance->dcOptions().lookup(
 			bareDc,
 			_currentDcType,
 			_options->proxy.type != ProxyData::Type::None);
@@ -1247,7 +1260,7 @@ void SessionPrivate::handleReceived() {
 		auto sha1ForMsgKeyCheck = hashSha1(decryptedInts, hashedDataLength);
 
 		constexpr auto kMsgKeyShift_oldmtp = 4U;
-		if (memcmp(&msgKey, sha1ForMsgKeyCheck.data() + kMsgKeyShift_oldmtp, sizeof(msgKey)) != 0) {
+		if (ConstTimeIsDifferent(&msgKey, sha1ForMsgKeyCheck.data() + kMsgKeyShift_oldmtp, sizeof(msgKey))) {
 			LOG(("TCP Error: bad SHA1 hash after aesDecrypt in message."));
 			TCP_LOG(("TCP Error: bad message %1").arg(Logs::mb(encryptedInts, encryptedBytesCount).str()));
 
@@ -1267,7 +1280,7 @@ void SessionPrivate::handleReceived() {
 		SHA256_Final(sha256Buffer.data(), &msgKeyLargeContext);
 
 		constexpr auto kMsgKeyShift = 8U;
-		if (memcmp(&msgKey, sha256Buffer.data() + kMsgKeyShift, sizeof(msgKey)) != 0) {
+		if (ConstTimeIsDifferent(&msgKey, sha256Buffer.data() + kMsgKeyShift, sizeof(msgKey))) {
 			LOG(("TCP Error: bad SHA256 hash after aesDecrypt in message"));
 			TCP_LOG(("TCP Error: bad message %1").arg(Logs::mb(encryptedInts, encryptedBytesCount).str()));
 
@@ -2366,7 +2379,7 @@ void SessionPrivate::applyAuthKey(AuthKeyPtr &&encryptionKey) {
 			BareDcId(_shiftedDcId),
 			getProtocolDcId(),
 			_connection.get(),
-			_instance->dcOptions());
+			&_instance->dcOptions());
 	} else {
 		DEBUG_LOG(("AuthKey Info: No key in updateAuthKey(), "
 			"but someone is creating already, waiting."));

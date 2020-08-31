@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include "window/window_controls_layout.h"
+
 namespace Platform {
 
 void start();
@@ -20,6 +22,7 @@ enum class PermissionStatus {
 
 enum class PermissionType {
 	Microphone,
+	Camera,
 };
 
 enum class SystemSettingsType {
@@ -41,9 +44,19 @@ bool OpenSystemSettings(SystemSettingsType type);
 	return LastUserInputTime().has_value();
 }
 
+[[nodiscard]] std::optional<bool> IsDarkMode();
+[[nodiscard]] inline bool IsDarkModeSupported() {
+	return IsDarkMode().has_value();
+}
+
 void IgnoreApplicationActivationRightNow();
 bool AutostartSupported();
+bool TrayIconSupported();
 QImage GetImageFromClipboard();
+bool StartSystemMove(QWindow *window);
+bool StartSystemResize(QWindow *window, Qt::Edges edges);
+bool ShowWindowMenu(QWindow *window);
+Window::ControlsLayout WindowControlsLayout();
 
 namespace ThirdParty {
 

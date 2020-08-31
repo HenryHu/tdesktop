@@ -12,11 +12,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_widget.h"
 #include "core/crash_reports.h"
 #include "core/sandbox.h"
+#include "core/application.h"
+#include "core/core_settings.h"
 #include "storage/localstorage.h"
 #include "mainwindow.h"
 #include "history/history_location_manager.h"
 #include "base/platform/mac/base_utilities_mac.h"
-#include "facades.h"
+#include "base/platform/base_platform_info.h"
 
 #include <QtGui/QDesktopServices>
 #include <QtWidgets/QApplication>
@@ -136,6 +138,25 @@ void RemoveQuarantine(const QString &path) {
 	removexattr(local.data(), kQuarantineAttribute, 0);
 }
 
+bool IsDarkMenuBar() {
+	bool result = false;
+	@autoreleasepool {
+
+	NSDictionary *dict = [[NSUserDefaults standardUserDefaults] persistentDomainForName:NSGlobalDomain];
+	id style = [dict objectForKey:Q2NSString(strStyleOfInterface())];
+	BOOL darkModeOn = (style && [style isKindOfClass:[NSString class]] && NSOrderedSame == [style caseInsensitiveCompare:@"dark"]);
+	result = darkModeOn ? true : false;
+
+	}
+	return result;
+}
+
+std::optional<bool> IsDarkMode() {
+	return IsMac10_14OrGreater()
+		? std::make_optional(IsDarkMenuBar())
+		: std::nullopt;
+}
+
 void RegisterCustomScheme(bool force) {
 #ifndef TDESKTOP_DISABLE_REGISTER_CUSTOM_SCHEME
 	OSStatus result = LSSetDefaultHandlerForURLScheme(CFSTR("tg"), (CFStringRef)[[NSBundle mainBundle] bundleIdentifier]);
@@ -149,19 +170,23 @@ void RegisterCustomScheme(bool force) {
 PermissionStatus GetPermissionStatus(PermissionType type) {
 #ifndef OS_MAC_OLD
 	switch (type) {
-		case PermissionType::Microphone:
-			if([AVCaptureDevice respondsToSelector: @selector(authorizationStatusForMediaType:)]) { // Available starting with 10.14
-				switch([AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeAudio]) {
-					case AVAuthorizationStatusNotDetermined:
-						return PermissionStatus::CanRequest;
-					case AVAuthorizationStatusAuthorized:
-						return PermissionStatus::Granted;
-					case AVAuthorizationStatusDenied:
-					case AVAuthorizationStatusRestricted:
-						return PermissionStatus::Denied;
-				}
+	case PermissionType::Microphone:
+	case PermissionType::Camera:
+		const auto nativeType = (type == PermissionType::Microphone)
+			? AVMediaTypeAudio
+			: AVMediaTypeVideo;
+		if ([AVCaptureDevice respondsToSelector: @selector(authorizationStatusForMediaType:)]) { // Available starting with 10.14
+			switch ([AVCaptureDevice authorizationStatusForMediaType:nativeType]) {
+				case AVAuthorizationStatusNotDetermined:
+					return PermissionStatus::CanRequest;
+				case AVAuthorizationStatusAuthorized:
+					return PermissionStatus::Granted;
+				case AVAuthorizationStatusDenied:
+				case AVAuthorizationStatusRestricted:
+					return PermissionStatus::Denied;
 			}
-			break;
+		}
+		break;
 	}
 #endif // OS_MAC_OLD
 	return PermissionStatus::Granted;
@@ -170,15 +195,19 @@ PermissionStatus GetPermissionStatus(PermissionType type) {
 void RequestPermission(PermissionType type, Fn<void(PermissionStatus)> resultCallback) {
 #ifndef OS_MAC_OLD
 	switch (type) {
-		case PermissionType::Microphone:
-			if ([AVCaptureDevice respondsToSelector: @selector(requestAccessForMediaType:completionHandler:)]) { // Available starting with 10.14
-				[AVCaptureDevice requestAccessForMediaType:AVMediaTypeAudio completionHandler:^(BOOL granted) {
-					crl::on_main([=] {
-						resultCallback(granted ? PermissionStatus::Granted : PermissionStatus::Denied);
-					});
-				}];
-			}
-			break;
+	case PermissionType::Microphone:
+	case PermissionType::Camera:
+		const auto nativeType = (type == PermissionType::Microphone)
+			? AVMediaTypeAudio
+			: AVMediaTypeVideo;
+		if ([AVCaptureDevice respondsToSelector: @selector(requestAccessForMediaType:completionHandler:)]) { // Available starting with 10.14
+			[AVCaptureDevice requestAccessForMediaType:nativeType completionHandler:^(BOOL granted) {
+				crl::on_main([=] {
+					resultCallback(granted ? PermissionStatus::Granted : PermissionStatus::Denied);
+				});
+			}];
+		}
+		break;
 	}
 #endif // OS_MAC_OLD
 	resultCallback(PermissionStatus::Granted);
@@ -188,9 +217,12 @@ void RequestPermission(PermissionType type, Fn<void(PermissionStatus)> resultCal
 void OpenSystemSettingsForPermission(PermissionType type) {
 #ifndef OS_MAC_OLD
 	switch (type) {
-		case PermissionType::Microphone:
-			[[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"]];
-			break;
+	case PermissionType::Microphone:
+		[[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"]];
+		break;
+	case PermissionType::Camera:
+		[[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"x-apple.systempreferences:com.apple.preference.security?Privacy_Camera"]];
+		break;
 	}
 #endif // OS_MAC_OLD
 }
@@ -262,8 +294,15 @@ void IgnoreApplicationActivationRightNow() {
 	objc_ignoreApplicationActivationRightNow();
 }
 
-bool AutostartSupported() {
-	return false;
+Window::ControlsLayout WindowControlsLayout() {
+	Window::ControlsLayout controls;
+	controls.left = {
+		Window::Control::Close,
+		Window::Control::Minimize,
+		Window::Control::Maximize,
+	};
+
+	return controls;
 }
 
 } // namespace Platform
@@ -279,7 +318,7 @@ void psSendToMenu(bool send, bool silent) {
 }
 
 void psDownloadPathEnableAccess() {
-	objc_downloadPathEnableAccess(Global::DownloadPathBookmark());
+	objc_downloadPathEnableAccess(Core::App().settings().downloadPathBookmark());
 }
 
 QByteArray psDownloadPathBookmark(const QString &path) {

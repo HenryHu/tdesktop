@@ -20,9 +20,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "storage/localstorage.h"
 #include "core/crash_reports.h"
 
+#include <QtCore/QOperatingSystemVersion>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QDesktopWidget>
 #include <QtGui/QDesktopServices>
+#include <QtGui/QWindow>
 #include <qpa/qplatformnativeinterface.h>
 
 #include <Shobjidl.h>
@@ -382,8 +384,62 @@ std::optional<crl::time> LastUserInputTime() {
 	return LastTrackedWhen;
 }
 
+std::optional<bool> IsDarkMode() {
+	static const auto kSystemVersion = QOperatingSystemVersion::current();
+	static const auto kDarkModeAddedVersion = QOperatingSystemVersion(
+		QOperatingSystemVersion::Windows,
+		10,
+		0,
+		17763);
+	static const auto kSupported = (kSystemVersion >= kDarkModeAddedVersion);
+	if (!kSupported) {
+		return std::nullopt;
+	}
+
+	const auto keyName = L""
+		"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize";
+	const auto valueName = L"AppsUseLightTheme";
+	auto key = HKEY();
+	auto result = RegOpenKeyEx(HKEY_CURRENT_USER, keyName, 0, KEY_READ, &key);
+	if (result != ERROR_SUCCESS) {
+		return std::nullopt;
+	}
+
+	DWORD value = 0, type = 0, size = sizeof(value);
+	result = RegQueryValueEx(key, valueName, 0, &type, (LPBYTE)&value, &size);
+	RegCloseKey(key);
+	if (result != ERROR_SUCCESS) {
+		return std::nullopt;
+	}
+
+	return (value == 0);
+}
+
 bool AutostartSupported() {
 	return !IsWindowsStoreBuild();
+}
+
+bool ShowWindowMenu(QWindow *window) {
+	const auto pos = QCursor::pos();
+
+	SendMessage(
+		HWND(window->winId()),
+		WM_SYSCOMMAND,
+		SC_MOUSEMENU,
+		MAKELPARAM(pos.x(), pos.y()));
+
+	return true;
+}
+
+Window::ControlsLayout WindowControlsLayout() {
+	Window::ControlsLayout controls;
+	controls.right = {
+		Window::Control::Minimize,
+		Window::Control::Maximize,
+		Window::Control::Close,
+	};
+
+	return controls;
 }
 
 } // namespace Platform
@@ -537,6 +593,7 @@ bool OpenSystemSettings(SystemSettingsType type) {
 	if (type == SystemSettingsType::Audio) {
 		crl::on_main([] {
 			WinExec("control.exe mmsys.cpl", SW_SHOW);
+			//QDesktopServices::openUrl(QUrl("ms-settings:sound"));
 		});
 	}
 	return true;

@@ -15,6 +15,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_menu_update" = "Update";
 "lng_menu_back" = "Back";
 "lng_menu_night_mode" = "Night Mode";
+"lng_menu_add_account" = "Add Account";
+"lng_menu_activate" = "Activate";
 
 "lng_disable_notifications_from_tray" = "Disable notifications";
 "lng_enable_notifications_from_tray" = "Enable notifications";
@@ -290,6 +292,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_empty_bio" = "None";
 
 "lng_settings_section_notify" = "Notifications";
+"lng_settings_show_from" = "Show notifications from";
+"lng_settings_notify_all" = "All accounts";
+"lng_settings_notify_all_about" = "Turn this off if you want to receive notifications only from the account you are currently using.";
 "lng_settings_notify_title" = "Notifications for chats";
 "lng_settings_desktop_notify" = "Desktop notifications";
 "lng_settings_show_name" = "Show sender's name";
@@ -333,6 +338,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_update_fail" = "Update check failed :(";
 "lng_settings_workmode_tray" = "Show tray icon";
 "lng_settings_workmode_window" = "Show taskbar icon";
+"lng_settings_native_frame" = "Use system window frame";
 "lng_settings_auto_start" = "Launch Telegram when system starts";
 "lng_settings_start_min" = "Launch minimized";
 "lng_settings_add_sendto" = "Place Telegram in \"Send to\" menu";
@@ -364,6 +370,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_adaptive_wide" = "Adaptive layout for wide screens";
 
 "lng_settings_section_call_settings" = "Calls Settings";
+"lng_settings_call_camera" = "Camera";
 "lng_settings_call_section_output" = "Speakers and headphones";
 "lng_settings_call_section_input" = "Microphone";
 "lng_settings_call_input_device" = "Input device";
@@ -374,7 +381,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_call_stop_mic_test" = "Stop test";
 "lng_settings_call_section_other" = "Other settings";
 "lng_settings_call_open_system_prefs" = "Open system sound preferences";
-"lng_settings_call_device_default" = "Default";
+"lng_settings_call_device_default" = "Same as the System";
 "lng_settings_call_audio_ducking" = "Mute other sounds during calls";
 
 "lng_settings_language" = "Language";
@@ -418,6 +425,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_passcode_title" = "Local passcode";
 "lng_settings_password_title" = "Two-step verification";
 "lng_settings_sessions_title" = "Active sessions";
+"lng_settings_new_unknown" = "New chats from unknown users";
+"lng_settings_auto_archive" = "Archive and Mute";
+"lng_settings_auto_archive_about" = "Automatically archive and mute new chats, groups and channels from non-contacts.";
 "lng_settings_destroy_title" = "Delete my account";
 "lng_settings_network_proxy" = "Network and proxy";
 "lng_settings_version_info" = "Version and updates";
@@ -427,6 +437,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_settings_sensitive_title" = "Sensitive content";
 "lng_settings_sensitive_disable_filtering" = "Disable filtering";
 "lng_settings_sensitive_about" = "Display sensitive media in public channels on all your Telegram devices.";
+
+"lng_settings_auto_night_mode" = "Auto-Night mode";
+"lng_settings_auto_night_enabled" = "Match the system settings";
+"lng_settings_auto_night_warning" = "You have enabled auto-night mode. If you want to change the dark mode settings, you'll need to disable it first.";
+"lng_settings_auto_night_disable" = "Disable";
+
+"lng_suggest_hide_new_title" = "Hide new chats?";
+"lng_suggest_hide_new_about" = "You are receiving lots of new chats from users who are not in your Contact List.\n\nDo you want to have such chats **automatically muted** and **archived**?";
+"lng_suggest_hide_new_to_settings" = "Go to Settings";
 
 "lng_settings_spellchecker" = "Spell checker";
 "lng_settings_system_spellchecker" = "Use system spell checker";
@@ -1121,6 +1140,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_group_invite_members#one" = "{count} member, among them:";
 "lng_group_invite_members#other" = "{count} members, among them:";
+"lng_channel_invite_private" = "This channel is private.\nPlease join it to continue viewing its content.";
 
 "lng_group_invite_create" = "Create an invite link";
 "lng_group_invite_about" = "Telegram users will be able to join\nyour group by following this link.";
@@ -1200,6 +1220,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_recent_stickers" = "Frequently used";
 "lng_faved_stickers_add" = "Add to Favorites";
 "lng_faved_stickers_remove" = "Remove from Favorites";
+"lng_recent_stickers_remove" = "Remove from Recent";
 "lng_group_stickers" = "Group stickers";
 "lng_group_stickers_description" = "You can choose a sticker set which will be available for every member while in the group chat.";
 "lng_group_stickers_add" = "Choose sticker set";
@@ -1275,6 +1296,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_new_contact_share_done" = "{user} can now see your phone number.";
 "lng_new_contact_add_name" = "Add {user} to contacts";
 "lng_new_contact_add_done" = "{user} is now in your contact list.";
+"lng_new_contact_unarchive" = "Unarchive";
 "lng_cant_send_to_not_contact" = "Sorry, you can only send messages to\nmutual contacts at the moment.\n{more_info}";
 "lng_cant_invite_not_contact" = "Sorry, you can only add mutual contacts\nto groups at the moment.\n{more_info}";
 "lng_cant_more_info" = "More info »";
@@ -1448,6 +1470,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_context_copy_text" = "Copy Text";
 "lng_context_open_gif" = "Open GIF";
 "lng_context_save_gif" = "Save GIF";
+"lng_context_delete_gif" = "Delete GIF";
 "lng_context_attached_stickers" = "Attached Stickers";
 "lng_context_to_msg" = "Go To Message";
 "lng_context_reply_msg" = "Reply";
@@ -1703,6 +1726,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 "lng_call_error_not_available" = "Sorry, {user} doesn't accept calls.";
 "lng_call_error_outdated" = "{user}'s app does not support calls. They need to update their app before you can call them.";
+"lng_call_error_no_camera" = "No camera could be found. Please make sure that your camera is connected to the computer.";
+"lng_call_error_camera_not_started" = "You can switch to video call once you're connected.";
+"lng_call_error_camera_outdated" = "{user}'s app does not support video calls. They need to update their app.";
 "lng_call_error_audio_io" = "There seems to be a problem with audio playback on your computer. Please make sure that your computer's speakers and microphone are working and try again.";
 
 "lng_call_bar_hangup" = "End call";
@@ -1715,15 +1741,32 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_call_box_status_group" = "({amount}) {status}";
 
 "lng_call_outgoing" = "Outgoing call";
+"lng_call_video_outgoing" = "Outgoing video call";
 "lng_call_incoming" = "Incoming call";
+"lng_call_video_incoming" = "Incoming video call";
 "lng_call_missed" = "Missed call";
+"lng_call_video_missed" = "Missed video call";
 "lng_call_cancelled" = "Cancelled call";
+"lng_call_video_cancelled" = "Cancelled video call";
 "lng_call_declined" = "Declined call";
+"lng_call_video_declined" = "Declined video call";
 "lng_call_duration_info" = "{time}, {duration}";
 "lng_call_type_and_duration" = "{type} ({duration})";
 
 "lng_call_rate_label" = "Please rate the quality of your call";
 "lng_call_rate_comment" = "Comment (optional)";
+
+"lng_call_start_video" = "Start Video";
+"lng_call_stop_video" = "Stop Video";
+"lng_call_end_call" = "End Call";
+"lng_call_mute_audio" = "Mute";
+"lng_call_unmute_audio" = "Unmute";
+"lng_call_accept" = "Accept";
+"lng_call_decline" = "Decline";
+"lng_call_redial" = "Redial";
+"lng_call_cancel" = "Cancel";
+
+"lng_call_microphone_off" = "{user}'s microphone is off";
 
 "lng_no_mic_permission" = "Telegram needs access to your microphone so that you can make calls and record voice messages.";
 

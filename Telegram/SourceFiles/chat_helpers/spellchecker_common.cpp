@@ -14,11 +14,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "lang/lang_instance.h"
 #include "lang/lang_keys.h"
+#include "main/main_account.h"
+#include "main/main_domain.h"
 #include "main/main_session.h"
 #include "mainwidget.h"
 #include "spellcheck/platform/platform_spellcheck.h"
 #include "spellcheck/spellcheck_utils.h"
 #include "spellcheck/spellcheck_value.h"
+#include "core/application.h"
+#include "core/core_settings.h"
 
 #include <QtGui/QGuiApplication>
 #include <QtGui/QInputMethod>
@@ -117,9 +121,9 @@ void EnsurePath() {
 }
 
 bool IsGoodPartName(const QString &name) {
-	return ranges::find_if(kDictExtensions, [&](const auto &ext) {
+	return ranges::any_of(kDictExtensions, [&](const auto &ext) {
 		return name.endsWith(ext);
-	}) != end(kDictExtensions);
+	});
 }
 
 using DictLoaderPtr = std::shared_ptr<base::unique_qptr<DictLoader>>;
@@ -142,11 +146,11 @@ void DownloadDictionaryInBackground(
 		BackgroundLoaderChanged.fire(0);
 
 		if (DictionaryExists(id)) {
-			auto dicts = session->settings().dictionariesEnabled();
+			auto dicts = Core::App().settings().dictionariesEnabled();
 			if (!ranges::contains(dicts, id)) {
 				dicts.push_back(id);
-				session->settings().setDictionariesEnabled(std::move(dicts));
-				session->saveSettingsDelayed();
+				Core::App().settings().setDictionariesEnabled(std::move(dicts));
+				Core::App().saveSettingsDelayed();
 			}
 		}
 
@@ -162,7 +166,8 @@ void DownloadDictionaryInBackground(
 
 	auto sharedLoader = std::make_shared<base::unique_qptr<DictLoader>>();
 	*sharedLoader = base::make_unique_q<DictLoader>(
-		App::main(),
+		QCoreApplication::instance(),
+		session,
 		id,
 		GetDownloadLocation(id),
 		DictPathByLangId(id),
@@ -197,12 +202,13 @@ rpl::producer<int> GlobalLoaderChanged() {
 
 DictLoader::DictLoader(
 	QObject *parent,
+	not_null<Main::Session*> session,
 	int id,
 	MTP::DedicatedLoader::Location location,
 	const QString &folder,
 	int size,
 	Fn<void()> destroyCallback)
-: BlobLoader(parent, id, location, folder, size)
+: BlobLoader(parent, session, id, location, folder, size)
 , _destroyCallback(std::move(destroyCallback)) {
 }
 
@@ -264,11 +270,10 @@ bool DictionaryExists(int langId) {
 		return true;
 	}
 	const auto folder = DictPathByLangId(langId) + '/';
-	const auto bad = ranges::find_if(kDictExtensions, [&](const auto &ext) {
+	return ranges::none_of(kDictExtensions, [&](const auto &ext) {
 		const auto name = Spellchecker::LocaleFromLangId(langId).name();
 		return !QFile(folder + name + '.' + ext).exists();
 	});
-	return (bad == end(kDictExtensions));
 }
 
 bool RemoveDictionary(int langId) {
@@ -309,18 +314,18 @@ bool WriteDefaultDictionary() {
 }
 
 rpl::producer<QString> ButtonManageDictsState(
-	not_null<Main::Session*> session) {
+		not_null<Main::Session*> session) {
 	if (Platform::Spellchecker::IsSystemSpellchecker()) {
 		return rpl::single(QString());
 	}
 	const auto computeString = [=] {
-		if (!session->settings().spellcheckerEnabled()) {
+		if (!Core::App().settings().spellcheckerEnabled()) {
 			return QString();
 		}
-		if (!session->settings().dictionariesEnabled().size()) {
+		if (!Core::App().settings().dictionariesEnabled().size()) {
 			return QString();
 		}
-		const auto dicts = session->settings().dictionariesEnabled();
+		const auto dicts = Core::App().settings().dictionariesEnabled();
 		const auto filtered = ranges::view::all(
 			dicts
 		) | ranges::views::filter(
@@ -332,16 +337,15 @@ rpl::producer<QString> ButtonManageDictsState(
 			? QString::number(filtered.size())
 			: tr::lng_contacts_loading(tr::now);
 	};
-	const auto emptyValue = [] { return rpl::empty_value(); };
 	return rpl::single(
 		computeString()
 	) | rpl::then(
 		rpl::merge(
 			Spellchecker::SupportedScriptsChanged(),
-			session->settings().dictionariesEnabledChanges(
-			) | rpl::map(emptyValue),
-			session->settings().spellcheckerEnabledChanges(
-			) | rpl::map(emptyValue)
+			Core::App().settings().dictionariesEnabledChanges(
+			) | rpl::to_empty,
+			Core::App().settings().spellcheckerEnabledChanges(
+			) | rpl::to_empty
 		) | rpl::map(computeString)
 	);
 }
@@ -374,7 +378,8 @@ void Start(not_null<Main::Session*> session) {
 		{ &ph::lng_spellchecker_remove, tr::lng_spellchecker_remove() },
 		{ &ph::lng_spellchecker_ignore, tr::lng_spellchecker_ignore() },
 	} });
-	const auto settings = &session->settings();
+	const auto settings = &Core::App().settings();
+	auto &lifetime = session->lifetime();
 
 	const auto onEnabled = [=](auto enabled) {
 		Platform::Spellchecker::UpdateLanguages(
@@ -388,31 +393,25 @@ void Start(not_null<Main::Session*> session) {
 	});
 
 	if (Platform::Spellchecker::IsSystemSpellchecker()) {
-
-		const auto scriptsLifetime =
-			session->lifetime().make_state<rpl::lifetime>();
-
-		Spellchecker::SupportedScriptsChanged(
-		) | rpl::start_with_next([=] {
-			AddExceptions();
-			scriptsLifetime->destroy();
-		}, *scriptsLifetime);
+		Spellchecker::SupportedScriptsChanged()
+		| rpl::take(1)
+		| rpl::start_with_next(AddExceptions, lifetime);
 
 		return;
 	}
 
 	Spellchecker::SupportedScriptsChanged(
-	) | rpl::start_with_next(AddExceptions, session->lifetime());
+	) | rpl::start_with_next(AddExceptions, lifetime);
 
 	Spellchecker::SetWorkingDirPath(DictionariesPath());
 
 	settings->dictionariesEnabledChanges(
 	) | rpl::start_with_next([](auto dictionaries) {
 		Platform::Spellchecker::UpdateLanguages(dictionaries);
-	}, session->lifetime());
+	}, lifetime);
 
 	settings->spellcheckerEnabledChanges(
-	) | rpl::start_with_next(onEnabled, session->lifetime());
+	) | rpl::start_with_next(onEnabled, lifetime);
 
 	const auto method = QGuiApplication::inputMethod();
 
@@ -446,10 +445,29 @@ void Start(not_null<Main::Session*> session) {
 			}
 
 			DownloadDictionaryInBackground(session, 0, DefaultLanguages());
-		}, session->lifetime());
+		}, lifetime);
 
 		connectInput();
 	}
+
+	const auto disconnect = [=] {
+		QObject::disconnect(
+			method,
+			&QInputMethod::localeChanged,
+			nullptr,
+			nullptr);
+	};
+	lifetime.add([=] {
+		disconnect();
+		for (auto &[index, account] : session->domain().accounts()) {
+			if (const auto anotherSession = account->maybeSession()) {
+				if (anotherSession->uniqueId() != session->uniqueId()) {
+					Spellchecker::Start(anotherSession);
+					return;
+				}
+			}
+		}
+	});
 
 	rpl::combine(
 		settings->spellcheckerEnabledValue(),
@@ -459,12 +477,8 @@ void Start(not_null<Main::Session*> session) {
 			connectInput();
 			return;
 		}
-		QObject::disconnect(
-			method,
-			&QInputMethod::localeChanged,
-			nullptr,
-			nullptr);
-	}, session->lifetime());
+		disconnect();
+	}, lifetime);
 
 }
 
