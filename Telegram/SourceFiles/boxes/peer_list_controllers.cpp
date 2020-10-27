@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_histories.h"
 #include "apiwrap.h"
 #include "mainwidget.h"
+#include "mainwindow.h"
 #include "lang/lang_keys.h"
 #include "history/history.h"
 #include "dialogs/dialogs_main_list.h"
@@ -103,6 +104,20 @@ void AddBotToGroup(not_null<UserData*> bot, not_null<PeerData*> chat) {
 //QPoint MembersAddButton::prepareRippleStartPosition() const {
 //	return mapFromGlobal(QCursor::pos()) - _st.rippleAreaPosition;
 //}
+
+object_ptr<Ui::BoxContent> PrepareContactsBox(
+		not_null<Window::SessionController*> sessionController) {
+	const auto controller = sessionController;
+	auto delegate = [=](not_null<PeerListBox*> box) {
+		box->addButton(tr::lng_close(), [=] { box->closeBox(); });
+		box->addLeftButton(
+			tr::lng_profile_add_contact(),
+			[=] { controller->widget()->onShowAddContact(); });
+	};
+	return Box<PeerListBox>(
+		std::make_unique<ContactsBoxController>(controller),
+		std::move(delegate));
+}
 
 void PeerListRowWithLink::setActionLink(const QString &action) {
 	_action = action;
@@ -584,8 +599,7 @@ void ChooseRecipientBoxController::rowClicked(not_null<PeerListRow*> row) {
 auto ChooseRecipientBoxController::createRow(
 		not_null<History*> history) -> std::unique_ptr<Row> {
 	const auto peer = history->peer;
-	const auto skip = peer->isChannel()
-		&& !peer->isMegagroup()
-		&& !peer->canWrite();
+	const auto skip = (peer->isBroadcast() && !peer->canWrite())
+		|| peer->isRepliesChat();
 	return skip ? nullptr : std::make_unique<Row>(history);
 }

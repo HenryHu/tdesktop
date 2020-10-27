@@ -90,6 +90,7 @@ Sandbox::Sandbox(
 	}
 })
 , _launcher(launcher) {
+	setQuitOnLastWindowClosed(false);
 }
 
 int Sandbox::start() {
@@ -315,7 +316,7 @@ void Sandbox::singleInstanceChecked() {
 		return;
 	}
 	const auto result = CrashReports::Start();
-	result.match([&](CrashReports::Status status) {
+	v::match(result, [&](CrashReports::Status status) {
 		if (status == CrashReports::CantOpen) {
 			new NotStartedWindow();
 		} else {
@@ -446,7 +447,6 @@ void Sandbox::checkForQuit() {
 }
 
 void Sandbox::refreshGlobalProxy() {
-#ifndef TDESKTOP_DISABLE_NETWORK_PROXY
 	const auto proxy = !Global::started()
 		? _sandboxProxy
 		: (Global::ProxySettings() == MTP::ProxyData::Settings::Enabled)
@@ -462,7 +462,6 @@ void Sandbox::refreshGlobalProxy() {
 	} else {
 		QNetworkProxy::setApplicationProxy(QNetworkProxy::NoProxy);
 	}
-#endif // TDESKTOP_DISABLE_NETWORK_PROXY
 }
 
 uint64 Sandbox::installationTag() const {

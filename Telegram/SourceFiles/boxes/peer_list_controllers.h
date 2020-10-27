@@ -31,8 +31,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 class History;
 
 namespace Window {
+class SessionController;
 class SessionNavigation;
 } // namespace Window
+
+[[nodiscard]] object_ptr<Ui::BoxContent> PrepareContactsBox(
+	not_null<Window::SessionController*> sessionController);
 
 class PeerListRowWithLink : public PeerListRow {
 public:
@@ -203,8 +207,7 @@ public:
 
 protected:
 	void prepareViewHook() override;
-	std::unique_ptr<Row> createRow(
-		not_null<History*> history) override;
+	std::unique_ptr<Row> createRow(not_null<History*> history) override;
 
 private:
 	const not_null<Window::SessionNavigation*> _navigation;

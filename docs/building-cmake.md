@@ -67,7 +67,7 @@ Go to ***BuildPath*** and run
     sudo make install
     cd ..
 
-    git clone https://github.com/01org/libva.git
+    git clone https://github.com/intel/libva.git
     cd libva
     CFLAGS=-fPIC CPPFLAGS=-fPIC LDFLAGS=-fPIC ./autogen.sh --enable-static
     make $MAKE_THREADS_CNT
@@ -94,7 +94,6 @@ Go to ***BuildPath*** and run
     --disable-network \
     --disable-autodetect \
     --disable-everything \
-    --disable-neon \
     --disable-alsa \
     --disable-iconv \
     --enable-libopus \
@@ -263,6 +262,7 @@ Go to ***BuildPath*** and run
     -qt-pcre \
     -qt-xcb \
     -no-gtk \
+    -no-icu \
     -static \
     -dbus-runtime \
     -openssl-linked \

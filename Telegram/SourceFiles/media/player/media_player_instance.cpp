@@ -203,10 +203,14 @@ void Instance::setSession(not_null<Data*> data, Main::Session *session) {
 		) | rpl::start_with_next([=] {
 			setSession(data, nullptr);
 		}, data->sessionLifetime);
+		session->data().itemRemoved(
+		) | rpl::filter([=](not_null<const HistoryItem*> item) {
+			return (data->current.contextId() == item->fullId());
+		}) | rpl::start_with_next([=] {
+			stopAndClear(data);
+		}, data->sessionLifetime);
 	} else {
-		stop(data->type);
-		_tracksFinishedNotifier.notify(data->type);
-		*data = Data(data->type, data->overview);
+		stopAndClear(data);
 	}
 }
 
@@ -527,6 +531,12 @@ void Instance::stop(AudioMsgId::Type type) {
 	}
 }
 
+void Instance::stopAndClear(not_null<Data*> data) {
+	stop(data->type);
+	_tracksFinishedNotifier.notify(data->type);
+	*data = Data(data->type, data->overview);
+}
+
 void Instance::playPause(AudioMsgId::Type type) {
 	if (const auto data = getData(type)) {
 		if (!data->streamed) {
@@ -758,7 +768,7 @@ void Instance::handleStreamingUpdate(
 		Streaming::Update &&update) {
 	using namespace Streaming;
 
-	update.data.match([&](Information &update) {
+	v::match(update.data, [&](Information &update) {
 		if (!update.video.size.isEmpty()) {
 			data->streamed->progress.setValueChangedCallback([=](
 					float64,
