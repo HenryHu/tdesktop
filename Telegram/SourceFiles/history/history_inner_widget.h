@@ -84,7 +84,7 @@ public:
 		int till) const;
 	void elementStartStickerLoop(not_null<const Element*> view);
 	[[nodiscard]] crl::time elementHighlightTime(
-		not_null<const Element*> view);
+		not_null<const HistoryItem*> item);
 	void elementShowPollResults(
 		not_null<PollData*> poll,
 		FullMsgId context);
@@ -92,6 +92,10 @@ public:
 		const TextWithEntities &text,
 		Fn<void()> hiddenCallback);
 	bool elementIsGifPaused();
+	void elementSendBotCommand(
+		const QString &command,
+		const FullMsgId &context);
+	void elementHandleViaClick(not_null<UserData*> bot);
 
 	void updateBotInfo(bool recount = true);
 
@@ -110,6 +114,10 @@ public:
 	// -1 if should not be visible, -2 if bad history()
 	int itemTop(const HistoryItem *item) const;
 	int itemTop(const Element *view) const;
+
+	// Returns (view, offset-from-top).
+	[[nodiscard]] std::pair<Element*, int> findViewForPinnedTracking(
+		int top) const;
 
 	void notifyIsBotChanged();
 	void notifyMigrateUpdated();
@@ -205,8 +213,6 @@ private:
 	// if it returns false the enumeration stops immidiately.
 	template <typename Method>
 	void enumerateDates(Method method);
-
-	ClickHandlerPtr hiddenUserpicLink(FullMsgId id);
 
 	void scrollDateCheck();
 	void scrollDateHideByTimer();

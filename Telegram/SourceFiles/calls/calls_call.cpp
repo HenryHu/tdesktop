@@ -25,6 +25,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "calls/calls_panel.h"
 #include "webrtc/webrtc_video_track.h"
 #include "webrtc/webrtc_media_devices.h"
+#include "webrtc/webrtc_create_adm.h"
 #include "data/data_user.h"
 #include "data/data_session.h"
 #include "facades.h"
@@ -231,7 +232,7 @@ void Call::startOutgoing() {
 	_api.request(MTPphone_RequestCall(
 		MTP_flags(flags),
 		_user->inputUser,
-		MTP_int(rand_value<int32>()),
+		MTP_int(openssl::RandomValue<int32>()),
 		MTP_bytes(_gaHash),
 		MTP_phoneCallProtocol(
 			MTP_flags(MTPDphoneCallProtocol::Flag::f_udp_p2p
@@ -288,10 +289,19 @@ void Call::startIncoming() {
 	}).send();
 }
 
+void Call::switchVideoOutgoing() {
+	const auto video = _videoOutgoing->state() == Webrtc::VideoState::Active;
+	_delegate->callRequestPermissionsOrFail(crl::guard(this, [=] {
+		videoOutgoing()->setState(StartVideoState(!video));
+	}), true);
+
+}
+
 void Call::answer() {
-	_delegate->requestPermissionsOrFail(crl::guard(this, [=] {
+	const auto video = _videoOutgoing->state() == Webrtc::VideoState::Active;
+	_delegate->callRequestPermissionsOrFail(crl::guard(this, [=] {
 		actuallyAnswer();
-	}));
+	}), video);
 }
 
 void Call::actuallyAnswer() {
@@ -359,10 +369,10 @@ void Call::setupOutgoingVideo() {
 			_errors.fire({ ErrorType::NoCamera });
 			_videoOutgoing->setState(Webrtc::VideoState::Inactive);
 		} else if (_state.current() != State::Established
-			&& state != started
-			&& !_videoCapture) {
+			&& (state != Webrtc::VideoState::Inactive)
+			&& (started == Webrtc::VideoState::Inactive)) {
 			_errors.fire({ ErrorType::NotStartedCall });
-			_videoOutgoing->setState(started);
+			_videoOutgoing->setState(Webrtc::VideoState::Inactive);
 		} else if (state != Webrtc::VideoState::Inactive
 			&& _instance
 			&& !_instance->supportsVideo()) {
@@ -770,17 +780,19 @@ void Call::createAndStartController(const MTPDphoneCall &call) {
 				sendSignalingData(bytes);
 			});
 		},
+		.createAudioDeviceModule = Webrtc::AudioDeviceModuleCreator(
+			settings.callAudioBackend()),
 	};
 	if (Logs::DebugEnabled()) {
 		auto callLogFolder = cWorkingDir() + qsl("DebugLogs");
 		auto callLogPath = callLogFolder + qsl("/last_call_log.txt");
 		auto callLogNative = QDir::toNativeSeparators(callLogPath);
 #ifdef Q_OS_WIN
-		descriptor.config.logPath = callLogNative.toStdWString();
+		descriptor.config.logPath.data = callLogNative.toStdWString();
 #else // Q_OS_WIN
 		const auto callLogUtf = QFile::encodeName(callLogNative);
-		descriptor.config.logPath.resize(callLogUtf.size());
-		ranges::copy(callLogUtf, descriptor.config.logPath.begin());
+		descriptor.config.logPath.data.resize(callLogUtf.size());
+		ranges::copy(callLogUtf, descriptor.config.logPath.data.begin());
 #endif // Q_OS_WIN
 		QFile(callLogPath).remove();
 		QDir().mkpath(callLogFolder);
@@ -942,20 +954,20 @@ void Call::setState(State state) {
 			_startTime = crl::now();
 			break;
 		case State::ExchangingKeys:
-			_delegate->playSound(Delegate::Sound::Connecting);
+			_delegate->callPlaySound(Delegate::CallSound::Connecting);
 			break;
 		case State::Ended:
-			_delegate->playSound(Delegate::Sound::Ended);
+			_delegate->callPlaySound(Delegate::CallSound::Ended);
 			[[fallthrough]];
 		case State::EndedByOtherDevice:
 			_delegate->callFinished(this);
 			break;
 		case State::Failed:
-			_delegate->playSound(Delegate::Sound::Ended);
+			_delegate->callPlaySound(Delegate::CallSound::Ended);
 			_delegate->callFailed(this);
 			break;
 		case State::Busy:
-			_delegate->playSound(Delegate::Sound::Busy);
+			_delegate->callPlaySound(Delegate::CallSound::Busy);
 			break;
 		}
 	}
@@ -978,15 +990,15 @@ void Call::setCurrentVideoDevice(const QString &deviceId) {
 	}
 }
 
-void Call::setAudioVolume(bool input, float level) {
-	if (_instance) {
-		if (input) {
-			_instance->setInputVolume(level);
-		} else {
-			_instance->setOutputVolume(level);
-		}
-	}
-}
+//void Call::setAudioVolume(bool input, float level) {
+//	if (_instance) {
+//		if (input) {
+//			_instance->setInputVolume(level);
+//		} else {
+//			_instance->setOutputVolume(level);
+//		}
+//	}
+//}
 
 void Call::setAudioDuckingEnabled(bool enabled) {
 	if (_instance) {
@@ -1027,7 +1039,12 @@ void Call::finish(FinishType type, const MTPPhoneCallDiscardReason &reason) {
 		|| (_videoOutgoing->state() != Webrtc::VideoState::Inactive))
 		? MTPphone_DiscardCall::Flag::f_video
 		: MTPphone_DiscardCall::Flag(0);
-	_api.request(MTPphone_DiscardCall(
+
+	// We want to discard request still being sent and processed even if
+	// the call is already destroyed.
+	const auto session = &_user->session();
+	const auto weak = base::make_weak(this);
+	session->api().request(MTPphone_DiscardCall( // We send 'discard' here.
 		MTP_flags(flags),
 		MTP_inputPhoneCall(
 			MTP_long(_id),
@@ -1038,11 +1055,11 @@ void Call::finish(FinishType type, const MTPPhoneCallDiscardReason &reason) {
 	)).done([=](const MTPUpdates &result) {
 		// Here 'this' could be destroyed by updates, so we set Ended after
 		// updates being handled, but in a guarded way.
-		crl::on_main(this, [=] { setState(finalState); });
-		_user->session().api().applyUpdates(result);
-	}).fail([this, finalState](const RPCError &error) {
+		crl::on_main(weak, [=] { setState(finalState); });
+		session->api().applyUpdates(result);
+	}).fail(crl::guard(weak, [this, finalState](const RPCError &error) {
 		setState(finalState);
-	}).send();
+	})).send();
 }
 
 void Call::setStateQueued(State state) {

@@ -33,6 +33,7 @@ class Media;
 enum class Context : char {
 	History,
 	Replies,
+	Pinned,
 	//Feed, // #feed
 	AdminLog,
 	ContactPreview
@@ -50,7 +51,7 @@ public:
 		Element *replacing = nullptr) = 0;
 	virtual bool elementUnderCursor(not_null<const Element*> view) = 0;
 	virtual crl::time elementHighlightTime(
-		not_null<const Element*> element) = 0;
+		not_null<const HistoryItem*> item) = 0;
 	virtual bool elementInSelectionMode() = 0;
 	virtual bool elementIntersectsRange(
 		not_null<const Element*> view,
@@ -66,6 +67,10 @@ public:
 	virtual bool elementIsGifPaused() = 0;
 	virtual bool elementHideReply(not_null<const Element*> view) = 0;
 	virtual bool elementShownUnread(not_null<const Element*> view) = 0;
+	virtual void elementSendBotCommand(
+		const QString &command,
+		const FullMsgId &context) = 0;
+	virtual void elementHandleViaClick(not_null<UserData*> bot) = 0;
 
 };
 
@@ -82,7 +87,7 @@ public:
 		Element *replacing = nullptr) override;
 	bool elementUnderCursor(not_null<const Element*> view) override;
 	crl::time elementHighlightTime(
-		not_null<const Element*> element) override;
+		not_null<const HistoryItem*> item) override;
 	bool elementInSelectionMode() override;
 	bool elementIntersectsRange(
 		not_null<const Element*> view,
@@ -98,6 +103,10 @@ public:
 	bool elementIsGifPaused() override;
 	bool elementHideReply(not_null<const Element*> view) override;
 	bool elementShownUnread(not_null<const Element*> view) override;
+	void elementSendBotCommand(
+		const QString &command,
+		const FullMsgId &context) override;
+	void elementHandleViaClick(not_null<UserData*> bot) override;
 
 private:
 	const not_null<Window::SessionController*> _controller;
@@ -116,6 +125,8 @@ TextSelection UnshiftItemSelection(
 TextSelection ShiftItemSelection(
 	TextSelection selection,
 	const Ui::Text::String &byText);
+
+QString DateTooltipText(not_null<Element*> view);
 
 // Any HistoryView::Element can have this Component for
 // displaying the unread messages bar above the message.
@@ -292,6 +303,13 @@ public:
 	virtual void unloadHeavyPart();
 	void checkHeavyPart();
 
+	void paintCustomHighlight(
+		Painter &p,
+		int y,
+		int height,
+		not_null<const HistoryItem*> item) const;
+	float64 highlightOpacity(not_null<const HistoryItem*> item) const;
+
 	// Legacy blocks structure.
 	HistoryBlock *block();
 	const HistoryBlock *block() const;
@@ -307,12 +325,18 @@ public:
 	void previousInBlocksChanged();
 	void nextInBlocksRemoved();
 
+	[[nodiscard]] ClickHandlerPtr fromPhotoLink() const {
+		return fromLink();
+	}
+
 	virtual ~Element();
 
 protected:
 	void paintHighlight(
 		Painter &p,
 		int geometryHeight) const;
+
+	[[nodiscard]] ClickHandlerPtr fromLink() const;
 
 	virtual void refreshDataIdHook();
 

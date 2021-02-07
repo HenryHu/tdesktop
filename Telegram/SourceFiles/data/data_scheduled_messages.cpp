@@ -33,8 +33,11 @@ constexpr auto kRequestTimeLimit = 60 * crl::time(1000);
 }
 
 MTPMessage PrepareMessage(const MTPMessage &message, MsgId id) {
-	return message.match([&](const MTPDmessageEmpty &) {
-		return MTP_messageEmpty(MTP_int(id));
+	return message.match([&](const MTPDmessageEmpty &data) {
+		return MTP_messageEmpty(
+			data.vflags(),
+			MTP_int(id),
+			data.vpeer_id() ? *data.vpeer_id() : MTPPeer());
 	}, [&](const MTPDmessageService &data) {
 		return MTP_messageService(
 			MTP_flags(data.vflags().v
@@ -543,7 +546,8 @@ int32 ScheduledMessages::countListHash(const List &list) const {
 	return HashFinalize(hash);
 }
 
-HistoryItem *ScheduledMessages::lastSentMessage(not_null<History*> history) {
+HistoryItem *ScheduledMessages::lastEditableMessage(
+		not_null<History*> history) {
 	const auto i = _data.find(history);
 	if (i == end(_data)) {
 		return nullptr;
@@ -552,10 +556,16 @@ HistoryItem *ScheduledMessages::lastSentMessage(not_null<History*> history) {
 
 	sort(list);
 	const auto items = ranges::view::reverse(list.items);
-	const auto it = ranges::find_if(
-		items,
-		&HistoryItem::canBeEditedFromHistory);
-	return (it == end(items)) ? nullptr : (*it).get();
+
+	const auto now = base::unixtime::now();
+	auto proj = [&](const OwnedItem &item) {
+		return item->allowsEdit(now);
+	};
+
+	const auto it = ranges::find_if(items, std::move(proj));
+	return (it == end(items))
+		? nullptr
+		: history->owner().groups().findItemToEdit((*it).get()).get();
 }
 
 } // namespace Data

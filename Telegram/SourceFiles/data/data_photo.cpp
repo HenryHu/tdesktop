@@ -166,7 +166,7 @@ float64 PhotoData::progress() const {
 		if (uploadingData->size > 0) {
 			const auto result = float64(uploadingData->offset)
 				/ uploadingData->size;
-			return snap(result, 0., 1.);
+			return std::clamp(result, 0., 1.);
 		}
 		return 0.;
 	}
@@ -203,6 +203,13 @@ Image *PhotoData::getReplyPreview(Data::FileOrigin origin) {
 		_replyPreview = std::make_unique<Data::ReplyPreview>(this);
 	}
 	return _replyPreview->image(origin);
+}
+
+bool PhotoData::replyPreviewLoaded() const {
+	if (!_replyPreview) {
+		return false;
+	}
+	return _replyPreview->loaded();
 }
 
 void PhotoData::setRemoteLocation(
@@ -374,6 +381,14 @@ void PhotoData::updateImages(
 		owner().cache(),
 		Data::kAnimationCacheTag,
 		[&](Data::FileOrigin origin) { loadVideo(origin); });
+}
+
+[[nodiscard]] bool PhotoData::hasAttachedStickers() const {
+	return _hasStickers;
+}
+
+void PhotoData::setHasAttachedStickers(bool value) {
+	_hasStickers = value;
 }
 
 int PhotoData::width() const {

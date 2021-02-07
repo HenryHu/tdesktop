@@ -15,7 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_window.h"
 #include "storage/localstorage.h"
 #include "ui/empty_userpic.h"
-#include "ui/text_options.h"
+#include "ui/text/text_options.h"
 #include "ui/unread_badge.h"
 #include "lang/lang_keys.h"
 #include "support/support_helper.h"
@@ -39,8 +39,14 @@ namespace {
 constexpr int kRecentlyInSeconds = 20 * 3600;
 const auto kPsaBadgePrefix = "cloud_lng_badge_psa_";
 
-bool ShowUserBotIcon(not_null<UserData*> user) {
+[[nodiscard]] bool ShowUserBotIcon(not_null<UserData*> user) {
 	return user->isBot() && !user->isSupport() && !user->isRepliesChat();
+}
+
+[[nodiscard]] bool ShowSendActionInDialogs(History *history) {
+	return history
+		&& (!history->peer->isUser()
+			|| history->peer->asUser()->onlineTill > 0);
 }
 
 void PaintRowTopRight(Painter &p, const QString &text, QRect &rectForName, bool active, bool selected) {
@@ -252,6 +258,8 @@ void paintRow(
 	p.fillRect(fullRect, bg);
 	row->paintRipple(p, 0, 0, fullWidth, &ripple->c);
 
+	const auto history = chat.history();
+
 	if (flags & Flag::SavedMessages) {
 		Ui::EmptyUserpic::PaintSavedMessages(
 			p,
@@ -270,7 +278,8 @@ void paintRow(
 		row->paintUserpic(
 			p,
 			from,
-			(flags & Flag::AllowUserOnline),
+			(flags & Flag::AllowUserOnline) ? history : nullptr,
+			ms,
 			active,
 			fullWidth);
 	} else if (hiddenSenderInfo) {
@@ -300,7 +309,6 @@ void paintRow(
 		return;
 	}
 
-	const auto history = chat.history();
 	auto namewidth = fullWidth - nameleft - st::dialogsPadding.x();
 	auto rectForName = QRect(
 		nameleft,
@@ -362,7 +370,8 @@ void paintRow(
 
 		p.setFont(st::dialogsTextFont);
 		auto &color = active ? st::dialogsTextFgServiceActive : (selected ? st::dialogsTextFgServiceOver : st::dialogsTextFgService);
-		if (history && !history->sendActionPainter()->paint(p, nameleft, texttop, availableWidth, fullWidth, color, ms)) {
+		if (!ShowSendActionInDialogs(history)
+			|| !history->sendActionPainter()->paint(p, nameleft, texttop, availableWidth, fullWidth, color, ms)) {
 			if (history->cloudDraftTextCache.isEmpty()) {
 				auto draftWrapped = textcmdLink(1, tr::lng_dialogs_text_from_wrapped(tr::now, lt_from, tr::lng_from_draft(tr::now)));
 				auto draftText = supportMode
@@ -389,7 +398,8 @@ void paintRow(
 
 		auto &color = active ? st::dialogsTextFgServiceActive : (selected ? st::dialogsTextFgServiceOver : st::dialogsTextFgService);
 		p.setFont(st::dialogsTextFont);
-		if (history && !history->sendActionPainter()->paint(p, nameleft, texttop, availableWidth, fullWidth, color, ms)) {
+		if (!ShowSendActionInDialogs(history)
+			|| !history->sendActionPainter()->paint(p, nameleft, texttop, availableWidth, fullWidth, color, ms)) {
 			// Empty history
 		}
 	} else if (!item->isEmpty()) {
@@ -441,6 +451,7 @@ void paintRow(
 		sendStateIcon->paint(p, rectForName.topLeft() + QPoint(rectForName.width(), 0), fullWidth);
 	}
 
+	p.setFont(st::msgNameFont);
 	if (flags & (Flag::SavedMessages | Flag::RepliesMessages)) {
 		auto text = (flags & Flag::SavedMessages)
 			? tr::lng_saved_messages(tr::now)
@@ -449,7 +460,6 @@ void paintRow(
 		if (textWidth > rectForName.width()) {
 			text = st::msgNameFont->elided(text, rectForName.width());
 		}
-		p.setFont(st::msgNameFont);
 		p.setPen(active
 			? st::dialogsNameFgActive
 			: selected
@@ -485,15 +495,18 @@ void paintRow(
 			: st::dialogsNameFg);
 		from->nameText().drawElided(p, rectForName.left(), rectForName.top(), rectForName.width());
 	} else if (hiddenSenderInfo) {
+		p.setPen(active
+			? st::dialogsNameFgActive
+			: selected
+			? st::dialogsNameFgOver
+			: st::dialogsNameFg);
 		hiddenSenderInfo->nameText.drawElided(p, rectForName.left(), rectForName.top(), rectForName.width());
 	} else {
-		const auto nameFg = active
+		p.setPen(active
 			? st::dialogsNameFgActive
-			: (selected
-				? st::dialogsArchiveFgOver
-				: st::dialogsArchiveFg);
-		p.setPen(nameFg);
-		p.setFont(st::msgNameFont);
+			: selected
+			? st::dialogsArchiveFgOver
+			: st::dialogsArchiveFg);
 		auto text = entry->chatListName(); // TODO feed name with emoji
 		auto textWidth = st::msgNameFont->width(text);
 		if (textWidth > rectForName.width()) {
@@ -741,14 +754,16 @@ void RowPainter::paint(
 			texttop,
 			availableWidth,
 			st::dialogsTextFont->height);
-		const auto actionWasPainted = history ? history->sendActionPainter()->paint(
-			p,
-			itemRect.x(),
-			itemRect.y(),
-			itemRect.width(),
-			fullWidth,
-			color,
-			ms) : false;
+		const auto actionWasPainted = ShowSendActionInDialogs(history)
+			? history->sendActionPainter()->paint(
+				p,
+				itemRect.x(),
+				itemRect.y(),
+				itemRect.width(),
+				fullWidth,
+				color,
+				ms)
+			: false;
 		if (const auto folder = row->folder()) {
 			PaintListEntryText(p, itemRect, active, selected, row);
 		} else if (!actionWasPainted) {
@@ -813,8 +828,10 @@ void RowPainter::paint(
 	const auto hiddenSenderInfo = [&]() -> const HiddenSenderInfo* {
 		if (const auto searchChat = row->searchInChat()) {
 			if (const auto peer = searchChat.peer()) {
-				if (peer->isSelf()) {
-					return item->hiddenForwardedInfo();
+				if (const auto forwarded = item->Get<HistoryMessageForwarded>()) {
+					if (peer->isSelf() || forwarded->imported) {
+						return forwarded->hiddenSenderInfo.get();
+					}
 				}
 			}
 		}

@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_sending.h"
 
 #include "api/api_text_entities.h"
+#include "base/openssl_help.h"
 #include "base/unixtime.h"
 #include "data/data_document.h"
 #include "data/data_photo.h"
@@ -21,8 +22,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/history_message.h" // NewMessageFlags.
 #include "chat_helpers/message_field.h" // ConvertTextTagsToEntities.
+#include "chat_helpers/stickers_dice_pack.h" // DicePacks::kDiceString.
 #include "ui/text/text_entity.h" // TextWithEntities.
-#include "ui/text_options.h" // Ui::ItemTextOptions.
+#include "ui/item_text_options.h" // Ui::ItemTextOptions.
 #include "main/main_session.h"
 #include "main/main_account.h"
 #include "main/main_app_config.h"
@@ -75,7 +77,7 @@ void SendExistingMedia(
 	const auto newId = FullMsgId(
 		peerToChannel(peer->id),
 		session->data().nextLocalMessageId());
-	const auto randomId = rand_value<uint64>();
+	const auto randomId = openssl::RandomValue<uint64>();
 
 	auto flags = NewMessageFlags(peer) | MTPDmessage::Flag::f_media;
 	auto clientFlags = NewMessageClientFlags();
@@ -85,8 +87,7 @@ void SendExistingMedia(
 		sendFlags |= MTPmessages_SendMedia::Flag::f_reply_to_msg_id;
 	}
 	const auto anonymousPost = peer->amAnonymous();
-	const auto silentPost = message.action.options.silent
-		|| (peer->isBroadcast() && session->data().notifySilentPosts(peer));
+	const auto silentPost = ShouldSendSilent(peer, message.action.options);
 	InnerFillMessagePostFlags(message.action.options, peer, flags);
 	if (silentPost) {
 		sendFlags |= MTPmessages_SendMedia::Flag::f_silent;
@@ -182,7 +183,8 @@ void SendExistingDocument(
 		return MTP_inputMediaDocument(
 			MTP_flags(0),
 			document->mtpInput(),
-			MTPint());
+			MTPint(), // ttl_seconds
+			MTPstring()); // query
 	};
 	SendExistingMedia(
 		std::move(message),
@@ -221,8 +223,12 @@ bool SendDice(Api::MessageToSend &message) {
 	auto &account = message.action.history->session().account();
 	auto &config = account.appConfig();
 	static const auto hardcoded = std::vector<QString>{
-		QString::fromUtf8("\xF0\x9F\x8E\xB2"),
-		QString::fromUtf8("\xF0\x9F\x8E\xAF")
+		Stickers::DicePacks::kDiceString,
+		Stickers::DicePacks::kDartString,
+		Stickers::DicePacks::kSlotString,
+		Stickers::DicePacks::kFballString,
+		Stickers::DicePacks::kFballString + QChar(0xFE0F),
+		Stickers::DicePacks::kBballString,
 	};
 	const auto list = config.get<std::vector<QString>>(
 		"emojies_send_dice",
@@ -244,7 +250,7 @@ bool SendDice(Api::MessageToSend &message) {
 	const auto newId = FullMsgId(
 		peerToChannel(peer->id),
 		session->data().nextLocalMessageId());
-	const auto randomId = rand_value<uint64>();
+	const auto randomId = openssl::RandomValue<uint64>();
 
 	auto &histories = history->owner().histories();
 	auto flags = NewMessageFlags(peer) | MTPDmessage::Flag::f_media;
@@ -256,8 +262,7 @@ bool SendDice(Api::MessageToSend &message) {
 	}
 	const auto replyHeader = NewMessageReplyHeader(message.action);
 	const auto anonymousPost = peer->amAnonymous();
-	const auto silentPost = message.action.options.silent
-		|| (peer->isBroadcast() && session->data().notifySilentPosts(peer));
+	const auto silentPost = ShouldSendSilent(peer, message.action.options);
 	InnerFillMessagePostFlags(message.action.options, peer, flags);
 	if (silentPost) {
 		sendFlags |= MTPmessages_SendMedia::Flag::f_silent;
@@ -398,7 +403,7 @@ void SendConfirmedFile(
 	}
 	const auto replyHeader = NewMessageReplyHeader(action);
 	const auto anonymousPost = peer->amAnonymous();
-	const auto silentPost = file->to.options.silent;
+	const auto silentPost = ShouldSendSilent(peer, file->to.options);
 	Api::FillMessagePostFlags(action, peer, flags);
 	if (silentPost) {
 		flags |= MTPDmessage::Flag::f_silent;

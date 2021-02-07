@@ -21,7 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/clip/media_clip_reader.h"
 #include "ui/effects/ripple_animation.h"
 #include "ui/text/text_isolated_emoji.h"
-#include "ui/text_options.h"
+#include "ui/text/text_options.h"
 #include "storage/file_upload.h"
 #include "storage/storage_facade.h"
 #include "storage/storage_shared_media.h"
@@ -44,7 +44,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_chat.h"
 #include "data/data_user.h"
 #include "styles/style_dialogs.h"
-#include "styles/style_history.h"
+#include "styles/style_chat.h"
 
 namespace {
 
@@ -273,9 +273,10 @@ HistoryItem *HistoryItem::lookupDiscussionPostOriginal() const {
 PeerData *HistoryItem::displayFrom() const {
 	if (const auto sender = discussionPostOriginalSender()) {
 		return sender;
-	} else if (history()->peer->isSelf()
-		|| history()->peer->isRepliesChat()) {
-		return senderOriginal();
+	} else if (const auto forwarded = Get<HistoryMessageForwarded>()) {
+		if (history()->peer->isSelf() || history()->peer->isRepliesChat() || forwarded->imported) {
+			return forwarded->originalSender;
+		}
 	}
 	return author().get();
 }
@@ -344,6 +345,28 @@ void HistoryItem::markMediaRead() {
 	if (mentionsMe()) {
 		history()->updateChatListEntry();
 		history()->eraseFromUnreadMentions(id);
+	}
+}
+
+void HistoryItem::setIsPinned(bool pinned) {
+	const auto changed = (isPinned() != pinned);
+	if (pinned) {
+		_flags |= MTPDmessage::Flag::f_pinned;
+		history()->session().storage().add(Storage::SharedMediaAddExisting(
+			history()->peer->id,
+			Storage::SharedMediaType::Pinned,
+			id,
+			{ id, id }));
+		history()->peer->setHasPinnedMessages(true);
+	} else {
+		_flags &= ~MTPDmessage::Flag::f_pinned;
+		history()->session().storage().remove(Storage::SharedMediaRemoveOne(
+			history()->peer->id,
+			Storage::SharedMediaType::Pinned,
+			id));
+	}
+	if (changed) {
+		history()->owner().requestItemResize(this);
 	}
 }
 
@@ -472,9 +495,12 @@ void HistoryItem::indexAsNewItem() {
 		addToUnreadMentions(UnreadMentionType::New);
 		if (const auto types = sharedMediaTypes()) {
 			_history->session().storage().add(Storage::SharedMediaAddNew(
-				history()->peer->id,
+				_history->peer->id,
 				types,
 				id));
+			if (types.test(Storage::SharedMediaType::Pinned)) {
+				_history->peer->setHasPinnedMessages(true);
+			}
 		}
 		//if (const auto channel = history()->peer->asChannel()) { // #feed
 		//	if (const auto feed = channel->feed()) {
@@ -509,12 +535,10 @@ void HistoryItem::setRealId(MsgId newId) {
 	_history->owner().requestItemRepaint(this);
 }
 
-bool HistoryItem::isPinned() const {
-	return (_history->peer->pinnedMessageId() == id);
-}
-
 bool HistoryItem::canPin() const {
 	if (id < 0 || !toHistoryMessage()) {
+		return false;
+	} else if (const auto m = media(); m && m->call()) {
 		return false;
 	}
 	return _history->peer->canPinMessages();
@@ -656,7 +680,7 @@ ChannelId HistoryItem::channelId() const {
 }
 
 Data::MessagePosition HistoryItem::position() const {
-	return Data::MessagePosition(date(), fullId());
+	return { .fullId = fullId(), .date = date() };
 }
 
 MsgId HistoryItem::replyToId() const {
@@ -737,26 +761,6 @@ void HistoryItem::updateDate(TimeId newDate) {
 
 bool HistoryItem::canUpdateDate() const {
 	return isScheduled();
-}
-
-bool HistoryItem::canBeEditedFromHistory() const {
-	// Skip if message is editing media.
-	if (isEditingMedia()) {
-		return false;
-	}
-	// Skip if message is video message or sticker.
-	if (const auto m = media()) {
-		// Skip only if media is not webpage.
-		if (!m->webpage() && !m->allowsEditCaption()) {
-			return false;
-		}
-	}
-	if ((IsServerMsgId(id) || isScheduled())
-		&& !serviceMsg()
-		&& (out() || history()->peer->isSelf())) {
-		return true;
-	}
-	return false;
 }
 
 void HistoryItem::sendFailed() {

@@ -29,6 +29,7 @@ class Session;
 namespace Data {
 
 class Session;
+class GroupCall;
 
 int PeerColorIndex(PeerId peerId);
 int PeerColorIndex(int32 bareId);
@@ -157,6 +158,7 @@ public:
 	}
 	[[nodiscard]] bool isVerified() const;
 	[[nodiscard]] bool isScam() const;
+	[[nodiscard]] bool isFake() const;
 	[[nodiscard]] bool isMegagroup() const;
 	[[nodiscard]] bool isBroadcast() const;
 	[[nodiscard]] bool isRepliesChat() const;
@@ -202,6 +204,7 @@ public:
 	[[nodiscard]] rpl::producer<bool> slowmodeAppliedValue() const;
 	[[nodiscard]] int slowmodeSecondsLeft() const;
 	[[nodiscard]] bool canSendPolls() const;
+	[[nodiscard]] bool canManageGroupCall() const;
 
 	[[nodiscard]] UserData *asUser();
 	[[nodiscard]] const UserData *asUser() const;
@@ -326,13 +329,9 @@ public:
 
 	[[nodiscard]] bool canPinMessages() const;
 	[[nodiscard]] bool canEditMessagesIndefinitely() const;
-	[[nodiscard]] MsgId pinnedMessageId() const {
-		return _pinnedMessageId;
-	}
-	void setPinnedMessageId(MsgId messageId);
-	void clearPinnedMessage() {
-		setPinnedMessageId(0);
-	}
+
+	[[nodiscard]] bool hasPinnedMessages() const;
+	void setHasPinnedMessages(bool has);
 
 	[[nodiscard]] bool canExportChatHistory() const;
 
@@ -387,6 +386,8 @@ public:
 	}
 	void setLoadedStatus(LoadedStatus status);
 
+	[[nodiscard]] Data::GroupCall *groupCall() const;
+
 	const PeerId id;
 	QString name;
 	MTPinputPeer input = MTP_inputPeerEmpty();
@@ -428,7 +429,7 @@ private:
 	base::flat_set<QChar> _nameFirstLetters;
 
 	crl::time _lastFullUpdate = 0;
-	MsgId _pinnedMessageId = 0;
+	bool _hasPinnedMessages = false;
 
 	Settings _settings = { kSettingsUnknown };
 	BlockStatus _blockStatus = BlockStatus::Unknown;
@@ -445,5 +446,16 @@ std::vector<ChatRestrictions> ListOfRestrictions();
 std::optional<QString> RestrictionError(
 	not_null<PeerData*> peer,
 	ChatRestriction restriction);
+
+void SetTopPinnedMessageId(not_null<PeerData*> peer, MsgId messageId);
+[[nodiscard]] FullMsgId ResolveTopPinnedId(
+	not_null<PeerData*> peer,
+	PeerData *migrated);
+[[nodiscard]] FullMsgId ResolveMinPinnedId(
+	not_null<PeerData*> peer,
+	PeerData *migrated);
+[[nodiscard]] std::optional<int> ResolvePinnedCount(
+	not_null<PeerData*> peer,
+	PeerData *migrated);
 
 } // namespace Data

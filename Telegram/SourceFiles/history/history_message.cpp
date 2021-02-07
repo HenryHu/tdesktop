@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_message.h"
 
+#include "base/openssl_help.h"
 #include "lang/lang_keys.h"
 #include "mainwidget.h"
 #include "mainwindow.h"
@@ -21,13 +22,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/media/history_view_media.h" // AddTimestampLinks.
 #include "chat_helpers/stickers_emoji_pack.h"
 #include "main/main_session.h"
+#include "main/main_session_settings.h"
+#include "api/api_updates.h"
 #include "boxes/share_box.h"
 #include "boxes/confirm_box.h"
 #include "ui/toast/toast.h"
 #include "ui/text/text_utilities.h"
 #include "ui/text/text_isolated_emoji.h"
 #include "ui/text/format_values.h"
-#include "ui/text_options.h"
+#include "ui/item_text_options.h"
 #include "core/application.h"
 #include "core/ui_integration.h"
 #include "window/notifications_manager.h"
@@ -44,7 +47,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "app.h"
 #include "styles/style_dialogs.h"
 #include "styles/style_widgets.h"
-#include "styles/style_history.h"
+#include "styles/style_chat.h"
 #include "styles/style_window.h"
 
 #include <QtGui/QGuiApplication>
@@ -276,11 +279,8 @@ void FastShareMessage(not_null<HistoryItem*> item) {
 			return;
 		}
 
-		const auto sendFlags = MTPmessages_ForwardMessages::Flag(0)
+		const auto commonSendFlags = MTPmessages_ForwardMessages::Flag(0)
 			| MTPmessages_ForwardMessages::Flag::f_with_my_score
-			| (options.silent
-				? MTPmessages_ForwardMessages::Flag::f_silent
-				: MTPmessages_ForwardMessages::Flag(0))
 			| (options.scheduled
 				? MTPmessages_ForwardMessages::Flag::f_schedule_date
 				: MTPmessages_ForwardMessages::Flag(0));
@@ -292,7 +292,7 @@ void FastShareMessage(not_null<HistoryItem*> item) {
 		auto generateRandom = [&] {
 			auto result = QVector<MTPlong>(data->msgIds.size());
 			for (auto &value : result) {
-				value = rand_value<MTPlong>();
+				value = openssl::RandomValue<MTPlong>();
 			}
 			return result;
 		};
@@ -310,13 +310,17 @@ void FastShareMessage(not_null<HistoryItem*> item) {
 			}
 			histories.sendRequest(history, requestType, [=](Fn<void()> finish) {
 				auto &api = history->session().api();
+				const auto sendFlags = commonSendFlags
+					| (ShouldSendSilent(peer, options)
+						? MTPmessages_ForwardMessages::Flag::f_silent
+						: MTPmessages_ForwardMessages::Flag(0));
 				history->sendRequestId = api.request(MTPmessages_ForwardMessages(
-						MTP_flags(sendFlags),
-						data->peer->input,
-						MTP_vector<MTPint>(msgIds),
-						MTP_vector<MTPlong>(generateRandom()),
-						peer->input,
-						MTP_int(options.scheduled)
+					MTP_flags(sendFlags),
+					data->peer->input,
+					MTP_vector<MTPint>(msgIds),
+					MTP_vector<MTPlong>(generateRandom()),
+					peer->input,
+					MTP_int(options.scheduled)
 				)).done([=](const MTPUpdates &updates, mtpRequestId requestId) {
 					history->session().api().applyUpdates(updates);
 					data->requests.remove(requestId);
@@ -374,6 +378,15 @@ MTPDmessage::Flags NewMessageFlags(not_null<PeerData*> peer) {
 	return result;
 }
 
+bool ShouldSendSilent(
+		not_null<PeerData*> peer,
+		const Api::SendOptions &options) {
+	return options.silent
+		|| (peer->isBroadcast() && peer->owner().notifySilentPosts(peer))
+		|| (peer->session().supportMode()
+			&& peer->session().settings().supportAllSilent());
+}
+
 MsgId LookupReplyToTop(not_null<History*> history, MsgId replyToId) {
 	const auto &owner = history->owner();
 	if (const auto item = owner.message(history->channelId(), replyToId)) {
@@ -427,6 +440,7 @@ struct HistoryMessage::CreateConfig {
 	QString authorOriginal;
 	TimeId originalDate = 0;
 	TimeId editDate = 0;
+	bool imported = false;
 
 	// For messages created from MTP structs.
 	const MTPMessageReplies *mtpReplies = nullptr;
@@ -453,6 +467,7 @@ void HistoryMessage::FillForwardedInfo(
 		config.savedFromPeer = peerFromMTP(*savedFromPeer);
 		config.savedFromMsgId = savedFromMsgId->v;
 	}
+	config.imported = data.is_imported();
 }
 
 HistoryMessage::HistoryMessage(
@@ -1083,6 +1098,17 @@ void HistoryMessage::createComponents(const CreateConfig &config) {
 	_fromNameVersion = from ? from->nameVersion : 1;
 }
 
+bool HistoryMessage::checkRepliesPts(const MTPMessageReplies &data) const {
+	const auto channel = history()->peer->asChannel();
+	const auto pts = channel
+		? channel->pts()
+		: history()->session().updates().pts();
+	const auto repliesPts = data.match([&](const MTPDmessageReplies &data) {
+		return data.vreplies_pts().v;
+	});
+	return (repliesPts >= pts);
+}
+
 void HistoryMessage::setupForwardedComponent(const CreateConfig &config) {
 	const auto forwarded = Get<HistoryMessageForwarded>();
 	if (!forwarded) {
@@ -1094,7 +1120,8 @@ void HistoryMessage::setupForwardedComponent(const CreateConfig &config) {
 		: nullptr;
 	if (!forwarded->originalSender) {
 		forwarded->hiddenSenderInfo = std::make_unique<HiddenSenderInfo>(
-			config.senderNameOriginal);
+			config.senderNameOriginal,
+			config.imported);
 	}
 	forwarded->originalId = config.originalId;
 	forwarded->originalAuthor = config.authorOriginal;
@@ -1102,6 +1129,7 @@ void HistoryMessage::setupForwardedComponent(const CreateConfig &config) {
 	forwarded->savedFromPeer = history()->owner().peerLoaded(
 		config.savedFromPeer);
 	forwarded->savedFromMsgId = config.savedFromMsgId;
+	forwarded->imported = config.imported;
 }
 
 void HistoryMessage::refreshMedia(const MTPMessageMedia *media) {
@@ -1317,7 +1345,9 @@ void HistoryMessage::applyEdition(const MTPDmessage &message) {
 	setForwardsCount(message.vforwards().value_or(-1));
 	setText(_media ? textWithEntities : EnsureNonEmpty(textWithEntities));
 	if (const auto replies = message.vreplies()) {
-		setReplies(*replies);
+		if (checkRepliesPts(*replies)) {
+			setReplies(*replies);
+		}
 	} else {
 		clearReplies();
 	}
@@ -1409,6 +1439,9 @@ Storage::SharedMediaTypesMask HistoryMessage::sharedMediaTypes() const {
 	if (hasTextLinks()) {
 		result.set(Storage::SharedMediaType::Link);
 	}
+	if (isPinned()) {
+		result.set(Storage::SharedMediaType::Pinned);
+	}
 	return result;
 }
 
@@ -1461,7 +1494,7 @@ void HistoryMessage::setText(const TextWithEntities &textWithEntities) {
 	}
 
 	clearIsolatedEmoji();
-	const auto context = Core::UiIntegration::Context{
+	const auto context = Core::MarkedTextContext{
 		.session = &history()->session()
 	};
 	_text.setMarkedText(

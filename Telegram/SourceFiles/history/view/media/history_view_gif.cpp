@@ -29,14 +29,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/image/image.h"
 #include "ui/text/format_values.h"
 #include "ui/grouped_layout.h"
+#include "ui/cached_round_corners.h"
 #include "data/data_session.h"
 #include "data/data_streaming.h"
 #include "data/data_document.h"
 #include "data/data_file_origin.h"
 #include "data/data_document_media.h"
-#include "app.h"
 #include "layout.h" // FullSelection
-#include "styles/style_history.h"
+#include "styles/style_chat.h"
 
 namespace HistoryView {
 namespace {
@@ -343,7 +343,7 @@ void Gif::draw(Painter &p, const QRect &r, TextSelection selection, crl::time ms
 			}
 		}
 	} else if (!isRound) {
-		App::roundShadow(p, 0, 0, paintw, height(), selected ? st::msgInShadowSelected : st::msgInShadow, selected ? InSelectedShadowCorners : InShadowCorners);
+		Ui::FillRoundShadow(p, 0, 0, paintw, height(), selected ? st::msgInShadowSelected : st::msgInShadow, selected ? Ui::InSelectedShadowCorners : Ui::InShadowCorners);
 	}
 
 	auto usex = 0, usew = paintw;
@@ -445,20 +445,20 @@ void Gif::draw(Painter &p, const QRect &r, TextSelection selection, crl::time ms
 					const auto roundTop = (roundCorners & RectPart::TopLeft);
 					const auto roundBottom = (roundCorners & RectPart::BottomLeft);
 					const auto margin = inWebPage
-						? st::buttonRadius
+						? st::roundRadiusSmall
 						: st::historyMessageRadius;
 					const auto parts = roundCorners
 						| RectPart::NoTopBottom
 						| (roundTop ? RectPart::Top : RectPart::None)
 						| (roundBottom ? RectPart::Bottom : RectPart::None);
-					App::roundRect(p, rthumb.marginsAdded({ 0, roundTop ? 0 : margin, 0, roundBottom ? 0 : margin }), st::imageBg, roundRadius, parts);
+					Ui::FillRoundRect(p, rthumb.marginsAdded({ 0, roundTop ? 0 : margin, 0, roundBottom ? 0 : margin }), st::imageBg, roundRadius, parts);
 				}
 			}
 		}
 	}
 
 	if (selected) {
-		App::complexOverlayRect(p, rthumb, roundRadius, roundCorners);
+		Ui::FillComplexOverlayRect(p, rthumb, roundRadius, roundCorners);
 	}
 
 	if (radial
@@ -471,7 +471,8 @@ void Gif::draw(Painter &p, const QRect &r, TextSelection selection, crl::time ms
 			: (radial && loaded)
 			? _animation->radial.opacity()
 			: 1.;
-		auto inner = QRect(rthumb.x() + (rthumb.width() - st::msgFileSize) / 2, rthumb.y() + (rthumb.height() - st::msgFileSize) / 2, st::msgFileSize, st::msgFileSize);
+		const auto innerSize = st::msgFileLayout.thumbSize;
+		auto inner = QRect(rthumb.x() + (rthumb.width() - innerSize) / 2, rthumb.y() + (rthumb.height() - innerSize) / 2, innerSize, innerSize);
 		p.setPen(Qt::NoPen);
 		if (selected) {
 			p.setBrush(st::msgDateImgBgSelected);
@@ -553,7 +554,7 @@ void Gif::draw(Painter &p, const QRect &r, TextSelection selection, crl::time ms
 		if (mediaUnread) {
 			statusW += st::mediaUnreadSkip + st::mediaUnreadSize;
 		}
-		App::roundRect(p, style::rtlrect(statusX - st::msgDateImgPadding.x(), statusY - st::msgDateImgPadding.y(), statusW, statusH, width()), selected ? st::msgServiceBgSelected : st::msgServiceBg, selected ? StickerSelectedCorners : StickerCorners);
+		Ui::FillRoundRect(p, style::rtlrect(statusX - st::msgDateImgPadding.x(), statusY - st::msgDateImgPadding.y(), statusW, statusH, width()), selected ? st::msgServiceBgSelected : st::msgServiceBg, selected ? Ui::StickerSelectedCorners : Ui::StickerCorners);
 		p.setFont(st::normalFont);
 		p.setPen(st::msgServiceFg);
 		p.drawTextLeft(statusX, statusY, width(), _statusText, statusW - 2 * st::msgDateImgPadding.x());
@@ -584,7 +585,7 @@ void Gif::draw(Painter &p, const QRect &r, TextSelection selection, crl::time ms
 			int recty = painty;
 			if (rtl()) rectx = width() - rectx - rectw;
 
-			App::roundRect(p, rectx, recty, rectw, recth, selected ? st::msgServiceBgSelected : st::msgServiceBg, selected ? StickerSelectedCorners : StickerCorners);
+			Ui::FillRoundRect(p, rectx, recty, rectw, recth, selected ? st::msgServiceBgSelected : st::msgServiceBg, selected ? Ui::StickerSelectedCorners : Ui::StickerCorners);
 			p.setPen(st::msgServiceFg);
 			rectx += st::msgReplyPadding.left();
 			rectw = innerw;
@@ -677,7 +678,7 @@ void Gif::drawCornerStatus(Painter &p, bool selected, QPoint position) const {
 	const auto statusY = position.y() + st::msgDateImgDelta + padding.y();
 	const auto around = style::rtlrect(statusX - padding.x(), statusY - padding.y(), statusW, statusH, width());
 	const auto statusTextTop = statusY + (cornerDownload ? (((statusH - 2 * st::normalFont->height) / 3)  - padding.y()) : 0);
-	App::roundRect(p, around, selected ? st::msgDateImgBgSelected : st::msgDateImgBg, selected ? DateSelectedCorners : DateCorners);
+	Ui::FillRoundRect(p, around, selected ? st::msgDateImgBgSelected : st::msgDateImgBg, selected ? Ui::DateSelectedCorners : Ui::DateCorners);
 	p.setFont(st::normalFont);
 	p.setPen(st::msgDateImgFg);
 	p.drawTextLeft(statusX + addLeft, statusTextTop, width(), text, statusW - 2 * padding.x());
@@ -884,7 +885,11 @@ bool Gif::fullFeaturedGrouped(RectParts sides) const {
 	return (sides & RectPart::Left) && (sides & RectPart::Right);
 }
 
-QSize Gif::sizeForGrouping() const {
+QSize Gif::sizeForGroupingOptimal(int maxWidth) const {
+	return sizeForAspectRatio();
+}
+
+QSize Gif::sizeForGrouping(int width) const {
 	return sizeForAspectRatio();
 }
 
@@ -896,6 +901,7 @@ void Gif::drawGrouped(
 		const QRect &geometry,
 		RectParts sides,
 		RectParts corners,
+		float64 highlightOpacity,
 		not_null<uint64*> cacheKey,
 		not_null<QPixmap*> cache) const {
 	ensureDataMediaCreated();
@@ -984,8 +990,16 @@ void Gif::drawGrouped(
 		p.drawPixmap(geometry, *cache);
 	}
 
-	if (selected) {
-		App::complexOverlayRect(p, geometry, roundRadius, corners);
+	const auto overlayOpacity = selected
+		? (1. - highlightOpacity)
+		: highlightOpacity;
+	if (overlayOpacity > 0.) {
+		p.setOpacity(overlayOpacity);
+		Ui::FillComplexOverlayRect(p, geometry, roundRadius, corners);
+		if (!selected) {
+			Ui::FillComplexOverlayRect(p, geometry, roundRadius, corners);
+		}
+		p.setOpacity(1.);
 	}
 
 	if (radial

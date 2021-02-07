@@ -24,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/mtproto_config.h"
 #include "ui/toast/toast.h"
 #include "ui/image/image_location_factory.h"
+#include "base/openssl_help.h"
 #include "base/unixtime.h"
 #include "styles/style_chat_helpers.h"
 
@@ -313,7 +314,7 @@ bool Stickers::applyArchivedResultFake() {
 		const auto raw = set.get();
 		if ((raw->flags & MTPDstickerSet::Flag::f_installed_date)
 			&& !(raw->flags & MTPDstickerSet_ClientFlag::f_special)) {
-			if (rand_value<uint32>() % 128 < 64) {
+			if (openssl::RandomValue<uint32>() % 128 < 64) {
 				const auto data = MTP_stickerSet(
 					MTP_flags(raw->flags | MTPDstickerSet::Flag::f_archived),
 					MTP_int(raw->installDate),
@@ -321,7 +322,7 @@ bool Stickers::applyArchivedResultFake() {
 					MTP_long(raw->access),
 					MTP_string(raw->title),
 					MTP_string(raw->shortName),
-					MTP_photoSizeEmpty(MTP_string()),
+					MTP_vector<MTPPhotoSize>(),
 					MTP_int(0),
 					MTP_int(raw->count),
 					MTP_int(raw->hash));
@@ -814,10 +815,20 @@ void Stickers::featuredSetsReceived(
 		auto it = sets.find(data->vid().v);
 		const auto title = getSetTitle(*data);
 		const auto installDate = data->vinstalled_date().value_or_empty();
-		const auto thumb = data->vthumb();
-		const auto thumbnail = thumb
-			? Images::FromPhotoSize(&session(), *data, *thumb)
-			: ImageWithLocation();
+		const auto thumbnail = [&] {
+			if (const auto thumbs = data->vthumbs()) {
+				for (const auto &thumb : thumbs->v) {
+					const auto result = Images::FromPhotoSize(
+						&session(),
+						*data,
+						thumb);
+					if (result.location.valid()) {
+						return result;
+					}
+				}
+			}
+			return ImageWithLocation();
+		}();
 		if (it == sets.cend()) {
 			auto setClientFlags = MTPDstickerSet_ClientFlag::f_featured
 				| MTPDstickerSet_ClientFlag::f_not_loaded;
@@ -1126,10 +1137,20 @@ StickersSet *Stickers::feedSet(const MTPDstickerSet &data) {
 	auto it = sets.find(data.vid().v);
 	auto title = getSetTitle(data);
 	auto flags = MTPDstickerSet::Flags(0);
-	const auto thumb = data.vthumb();
-	const auto thumbnail = thumb
-		? Images::FromPhotoSize(&session(), data, *thumb)
-		: ImageWithLocation();
+	const auto thumbnail = [&] {
+		if (const auto thumbs = data.vthumbs()) {
+			for (const auto &thumb : thumbs->v) {
+				const auto result = Images::FromPhotoSize(
+					&session(),
+					data,
+					thumb);
+				if (result.location.valid()) {
+					return result;
+				}
+			}
+		}
+		return ImageWithLocation();
+	}();
 	if (it == sets.cend()) {
 		it = sets.emplace(data.vid().v, std::make_unique<StickersSet>(
 			&owner(),

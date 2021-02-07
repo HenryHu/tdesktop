@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/application.h"
 #include "media/player/media_player_instance.h"
 #include "base/platform/base_platform_info.h"
+#include "platform/platform_specific.h"
 #include "base/parse_helper.h"
 #include "facades.h"
 
@@ -385,7 +386,7 @@ void Manager::fillDefaults() {
 	set(qsl("ctrl+0"), Command::ChatSelf);
 
 	set(qsl("ctrl+9"), Command::ShowArchive);
-	set(qsl("ctrl+shift+n"), Command::ShowContacts);
+	set(qsl("ctrl+j"), Command::ShowContacts);
 
 	set(qsl("ctrl+r"), Command::ReadChat);
 }

@@ -29,7 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
-#include "styles/style_history.h"
+#include "styles/style_chat.h"
 
 #include <QtCore/QMimeData>
 #include <QtCore/QStack>
@@ -499,6 +499,11 @@ MessageLinksParser::MessageLinksParser(not_null<Ui::InputField*> field)
 		_lastLength = length;
 	});
 	_field->installEventFilter(this);
+}
+
+void MessageLinksParser::parseNow() {
+	_timer.cancel();
+	parse();
 }
 
 bool MessageLinksParser::eventFilter(QObject *object, QEvent *event) {

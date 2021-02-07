@@ -15,8 +15,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/popup_menu.h"
 #include "ui/text/format_values.h"
+#include "ui/cached_round_corners.h"
 #include "lang/lang_keys.h"
-#include "app.h"
 #include "styles/style_media_view.h"
 
 namespace Media {
@@ -104,7 +104,7 @@ PlaybackControls::PlaybackControls(
 void PlaybackControls::handleSeekProgress(float64 progress) {
 	if (!_lastDurationMs) return;
 
-	const auto positionMs = snap(
+	const auto positionMs = std::clamp(
 		static_cast<crl::time>(progress * _lastDurationMs),
 		crl::time(0),
 		_lastDurationMs);
@@ -120,7 +120,7 @@ void PlaybackControls::handleSeekProgress(float64 progress) {
 void PlaybackControls::handleSeekFinished(float64 progress) {
 	if (!_lastDurationMs) return;
 
-	const auto positionMs = snap(
+	const auto positionMs = std::clamp(
 		static_cast<crl::time>(progress * _lastDurationMs),
 		crl::time(0),
 		_lastDurationMs);
@@ -429,7 +429,7 @@ void PlaybackControls::paintEvent(QPaintEvent *e) {
 		_volumeController->setFadeOpacity(1.);
 		_childrenHidden = false;
 	}
-	App::roundRect(p, rect(), st::mediaviewSaveMsgBg, MediaviewSaveCorners);
+	Ui::FillRoundRect(p, rect(), st::mediaviewSaveMsgBg, Ui::MediaviewSaveCorners);
 }
 
 void PlaybackControls::mousePressEvent(QMouseEvent *e) {

@@ -97,7 +97,7 @@ public:
 	bool elementUnderCursor(
 		not_null<const HistoryView::Element*> view) override;
 	crl::time elementHighlightTime(
-		not_null<const HistoryView::Element*> element) override;
+		not_null<const HistoryItem*> item) override;
 	bool elementInSelectionMode() override;
 	bool elementIntersectsRange(
 		not_null<const HistoryView::Element*> view,
@@ -116,6 +116,10 @@ public:
 		not_null<const HistoryView::Element*> view) override;
 	bool elementShownUnread(
 		not_null<const HistoryView::Element*> view) override;
+	void elementSendBotCommand(
+		const QString &command,
+		const FullMsgId &context) override;
+	void elementHandleViaClick(not_null<UserData*> bot) override;
 
 	~InnerWidget();
 
@@ -238,6 +242,7 @@ private:
 	std::vector<OwnedItem> _items;
 	std::set<uint64> _eventIds;
 	std::map<not_null<const HistoryItem*>, not_null<Element*>> _itemsByData;
+	base::flat_map<not_null<const HistoryItem*>, TimeId> _itemDates;
 	base::flat_set<FullMsgId> _animatedStickersPlayed;
 	base::flat_map<
 		not_null<PeerData*>,
