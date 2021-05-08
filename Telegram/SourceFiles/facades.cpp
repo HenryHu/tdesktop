@@ -31,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/history_item.h"
 #include "history/view/media/history_view_media.h"
+#include "payments/payments_checkout_process.h"
 #include "data/data_session.h"
 #include "styles/style_chat.h"
 
@@ -121,7 +122,10 @@ void activateBotCommand(
 	} break;
 
 	case ButtonType::Buy: {
-		Ui::show(Box<InformBox>(tr::lng_payments_not_supported(tr::now)));
+		Payments::CheckoutProcess::Start(
+			msg,
+			Payments::Mode::Payment,
+			crl::guard(App::wnd(), [] { App::wnd()->activate(); }));
 	} break;
 
 	case ButtonType::Url: {
@@ -229,12 +233,6 @@ void searchByHashtag(const QString &tag, PeerData *inPeer) {
 	}
 }
 
-void showSettings() {
-	if (auto w = App::wnd()) {
-		w->showSettings();
-	}
-}
-
 } // namespace App
 
 namespace Ui {
@@ -266,7 +264,7 @@ void showChatsList(not_null<Main::Session*> session) {
 	if (const auto m = CheckMainWidget(session)) {
 		m->ui_showPeerHistory(
 			0,
-			Window::SectionShow::Way::ClearStack,
+			::Window::SectionShow::Way::ClearStack,
 			0);
 	}
 }
@@ -283,7 +281,7 @@ void showPeerHistory(not_null<const PeerData*> peer, MsgId msgId) {
 	if (const auto m = CheckMainWidget(&peer->session())) {
 		m->ui_showPeerHistory(
 			peer->id,
-			Window::SectionShow::Way::ClearStack,
+			::Window::SectionShow::Way::ClearStack,
 			msgId);
 	}
 }

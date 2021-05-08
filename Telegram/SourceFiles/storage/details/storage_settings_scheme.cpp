@@ -721,14 +721,25 @@ bool ReadSetting(
 		context.legacyRead = true;
 	} break;
 
-	case dbiWindowPosition: {
-		auto position = TWindowPos();
+	case dbiWindowPositionOld: {
+		auto position = Core::WindowPosition();
+		if (!CheckStreamStatus(stream)) {
+			return false;
+		}
 		stream >> position.x >> position.y >> position.w >> position.h;
 		stream >> position.moncrc >> position.maximized;
 		if (!CheckStreamStatus(stream)) return false;
 
-		DEBUG_LOG(("Window Pos: Read from storage %1, %2, %3, %4 (maximized %5)").arg(position.x).arg(position.y).arg(position.w).arg(position.h).arg(Logs::b(position.maximized)));
-		cSetWindowPos(position);
+		DEBUG_LOG(("Window Pos: Read from legacy storage %1, %2, %3, %4 (scale %5%, maximized %6)")
+			.arg(position.x)
+			.arg(position.y)
+			.arg(position.w)
+			.arg(position.h)
+			.arg(position.scale)
+			.arg(Logs::b(position.maximized)));
+
+		Core::App().settings().setWindowPosition(position);
+		context.legacyRead = true;
 	} break;
 
 	case dbiLoggedPhoneNumberOld: { // deprecated
@@ -933,13 +944,13 @@ bool ReadSetting(
 		context.legacyRead = true;
 	} break;
 
-	case dbiRecentEmojiOldOld: {
-		RecentEmojiPreloadOldOld v;
+	case dbiRecentEmojiOldOldOld: {
+		auto v = QVector<QPair<uint32, ushort>>();
 		stream >> v;
 		if (!CheckStreamStatus(stream)) return false;
 
 		if (!v.isEmpty()) {
-			RecentEmojiPreload p;
+			auto p = QVector<QPair<QString, ushort>>();
 			p.reserve(v.size());
 			for (auto &item : v) {
 				auto oldKey = uint64(item.first);
@@ -960,18 +971,18 @@ bool ReadSetting(
 					p.push_back(qMakePair(id, item.second));
 				}
 			}
-			cSetRecentEmojiPreload(p);
+			Core::App().settings().setLegacyRecentEmojiPreload(std::move(p));
 		}
 		context.legacyRead = true;
 	} break;
 
-	case dbiRecentEmojiOld: {
-		RecentEmojiPreloadOld v;
+	case dbiRecentEmojiOldOld: {
+		auto v = QVector<QPair<uint64, ushort>>();
 		stream >> v;
 		if (!CheckStreamStatus(stream)) return false;
 
 		if (!v.isEmpty()) {
-			RecentEmojiPreload p;
+			auto p = QVector<QPair<QString, ushort>>();
 			p.reserve(v.size());
 			for (auto &item : v) {
 				auto id = Ui::Emoji::IdFromOldKey(item.first);
@@ -979,17 +990,18 @@ bool ReadSetting(
 					p.push_back(qMakePair(id, item.second));
 				}
 			}
-			cSetRecentEmojiPreload(p);
+			Core::App().settings().setLegacyRecentEmojiPreload(std::move(p));
 		}
 		context.legacyRead = true;
 	} break;
 
-	case dbiRecentEmoji: {
-		RecentEmojiPreload v;
+	case dbiRecentEmojiOld: {
+		auto v = QVector<QPair<QString, ushort>>();
 		stream >> v;
 		if (!CheckStreamStatus(stream)) return false;
 
-		cSetRecentEmojiPreload(v);
+		Core::App().settings().setLegacyRecentEmojiPreload(std::move(v));
+		context.legacyRead = true;
 	} break;
 
 	case dbiRecentStickers: {
@@ -1000,12 +1012,12 @@ bool ReadSetting(
 		cSetRecentStickersPreload(v);
 	} break;
 
-	case dbiEmojiVariantsOld: {
-		EmojiColorVariantsOld v;
+	case dbiEmojiVariantsOldOld: {
+		auto v = QMap<uint32, uint64>();
 		stream >> v;
 		if (!CheckStreamStatus(stream)) return false;
 
-		EmojiColorVariants variants;
+		auto variants = QMap<QString, int>();
 		for (auto i = v.cbegin(), e = v.cend(); i != e; ++i) {
 			auto id = Ui::Emoji::IdFromOldKey(static_cast<uint64>(i.key()));
 			if (!id.isEmpty()) {
@@ -1015,26 +1027,27 @@ bool ReadSetting(
 				}
 			}
 		}
-		cSetEmojiVariants(variants);
+		Core::App().settings().setLegacyEmojiVariants(std::move(variants));
 		context.legacyRead = true;
 	} break;
 
-	case dbiEmojiVariants: {
-		EmojiColorVariants v;
+	case dbiEmojiVariantsOld: {
+		auto v = QMap<QString, int>();
 		stream >> v;
 		if (!CheckStreamStatus(stream)) return false;
 
-		cSetEmojiVariants(v);
+		Core::App().settings().setLegacyEmojiVariants(std::move(v));
+		context.legacyRead = true;
 	} break;
 
 	case dbiHiddenPinnedMessagesOld: {
-		auto v = QMap<PeerId, MsgId>();
+		auto v = QMap<uint64, MsgId>();
 		stream >> v;
 		if (!CheckStreamStatus(stream)) return false;
 
 		for (auto i = v.begin(), e = v.end(); i != e; ++i) {
 			context.sessionSettings().setHiddenPinnedMessageId(
-				i.key(),
+				DeserializePeerId(i.key()),
 				i.value());
 		}
 		context.legacyRead = true;

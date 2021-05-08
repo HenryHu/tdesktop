@@ -48,7 +48,8 @@ MTPMessage PrepareMessage(const MTPMessage &message, MsgId id) {
 			data.vpeer_id(),
 			data.vreply_to() ? *data.vreply_to() : MTPMessageReplyHeader(),
 			data.vdate(),
-			data.vaction());
+			data.vaction(),
+			MTP_int(data.vttl_period().value_or_empty()));
 	}, [&](const MTPDmessage &data) {
 		return MTP_message(
 			MTP_flags(data.vflags().v | MTPDmessage::Flag::f_from_scheduled),
@@ -72,7 +73,8 @@ MTPMessage PrepareMessage(const MTPMessage &message, MsgId id) {
 			MTP_bytes(data.vpost_author().value_or_empty()),
 			MTP_long(data.vgrouped_id().value_or_empty()),
 			//MTPMessageReactions(),
-			MTPVector<MTPRestrictionReason>());
+			MTPVector<MTPRestrictionReason>(),
+			MTP_int(data.vttl_period().value_or_empty()));
 	});
 }
 
@@ -178,6 +180,9 @@ void ScheduledMessages::sendNowSimpleMessage(
 		| MTPDmessage::Flag::f_from_id
 		| (local->replyToId()
 			? MTPDmessage::Flag::f_reply_to
+			: MTPDmessage::Flag(0))
+		| (update.vttl_period()
+			? MTPDmessage::Flag::f_ttl_period
 			: MTPDmessage::Flag(0));
 	auto clientFlags = NewMessageClientFlags()
 		| MTPDmessage_ClientFlag::f_local_history_entry;
@@ -206,7 +211,8 @@ void ScheduledMessages::sendNowSimpleMessage(
 			MTP_string(),
 			MTPlong(),
 			//MTPMessageReactions(),
-			MTPVector<MTPRestrictionReason>()),
+			MTPVector<MTPRestrictionReason>(),
+			MTP_int(update.vttl_period().value_or_empty())),
 		clientFlags,
 		NewMessageType::Unread);
 
@@ -356,9 +362,9 @@ Data::MessagesSlice ScheduledMessages::list(not_null<History*> history) {
 	const auto &list = i->second.items;
 	result.skippedAfter = result.skippedBefore = 0;
 	result.fullCount = int(list.size());
-	result.ids = ranges::view::all(
+	result.ids = ranges::views::all(
 		list
-	) | ranges::view::transform(
+	) | ranges::views::transform(
 		&HistoryItem::fullId
 	) | ranges::to_vector;
 	return result;
@@ -377,7 +383,7 @@ void ScheduledMessages::request(not_null<History*> history) {
 			MTP_int(hash))
 	).done([=](const MTPmessages_Messages &result) {
 		parse(history, result);
-	}).fail([=](const RPCError &error) {
+	}).fail([=](const MTP::Error &error) {
 		_requests.remove(history);
 	}).send();
 }
@@ -528,11 +534,11 @@ int32 ScheduledMessages::countListHash(const List &list) const {
 	using namespace Api;
 
 	auto hash = HashInit();
-	auto &&serverside = ranges::view::all(
+	auto &&serverside = ranges::views::all(
 		list.items
-	) | ranges::view::filter([](const OwnedItem &item) {
+	) | ranges::views::filter([](const OwnedItem &item) {
 		return !item->isSending() && !item->hasFailed();
-	}) | ranges::view::reverse;
+	}) | ranges::views::reverse;
 	for (const auto &item : serverside) {
 		const auto j = list.idByItem.find(item.get());
 		HashUpdate(hash, j->second);
@@ -544,28 +550,6 @@ int32 ScheduledMessages::countListHash(const List &list) const {
 		HashUpdate(hash, item->date());
 	}
 	return HashFinalize(hash);
-}
-
-HistoryItem *ScheduledMessages::lastEditableMessage(
-		not_null<History*> history) {
-	const auto i = _data.find(history);
-	if (i == end(_data)) {
-		return nullptr;
-	}
-	auto &list = i->second;
-
-	sort(list);
-	const auto items = ranges::view::reverse(list.items);
-
-	const auto now = base::unixtime::now();
-	auto proj = [&](const OwnedItem &item) {
-		return item->allowsEdit(now);
-	};
-
-	const auto it = ranges::find_if(items, std::move(proj));
-	return (it == end(items))
-		? nullptr
-		: history->owner().groups().findItemToEdit((*it).get()).get();
 }
 
 } // namespace Data

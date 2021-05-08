@@ -174,7 +174,7 @@ void PaintImageProfile(QPainter &p, const QImage &image, QRect rect, QRect fill)
 				}
 			}
 			push();
-			LOG(("FRAME (%1): %2 (copies: %3)").arg(label).arg(times.join(' ')).arg(copies));
+			LOG(("FRAME (%1): %2 (copies: %3)").arg(label, times.join(' ')).arg(copies));
 			times = QStringList();
 			now = crl::now();
 		};
@@ -197,8 +197,7 @@ void PaintImageProfile(QPainter &p, const QImage &image, QRect rect, QRect fill)
 	});
 }
 
-QPixmap PrepareStaticImage(const QString &path) {
-	auto image = App::readImage(path, nullptr, false);
+QPixmap PrepareStaticImage(QImage image) {
 #if defined Q_OS_MAC && !defined OS_MAC_OLD
 	if (image.width() > kMaxDisplayImageSize
 		|| image.height() > kMaxDisplayImageSize) {
@@ -210,6 +209,14 @@ QPixmap PrepareStaticImage(const QString &path) {
 	}
 #endif // Q_OS_MAC && !OS_MAC_OLD
 	return App::pixmapFromImageInPlace(std::move(image));
+}
+
+QPixmap PrepareStaticImage(const QString &path) {
+	return PrepareStaticImage(App::readImage(path, nullptr, false));
+}
+
+QPixmap PrepareStaticImage(const QByteArray &bytes) {
+	return PrepareStaticImage(App::readImage(bytes, nullptr, false));
 }
 
 } // namespace
@@ -450,15 +457,13 @@ void OverlayWidget::moveToScreen() {
 			.arg(screenList.indexOf(activeWindowScreen)));
 		windowHandle()->setScreen(activeWindowScreen);
 		DEBUG_LOG(("Viewer Pos: New actual screen: %1")
-			.arg(windowHandle()
-				? screenList.indexOf(windowHandle()->screen())
-				: -2));
+			.arg(screenList.indexOf(windowHandle()->screen())));
 	}
 	updateGeometry();
 }
 
 void OverlayWidget::updateGeometry() {
-	if (Platform::IsLinux()) {
+	if (Platform::IsWayland()) {
 		return;
 	}
 	const auto screen = windowHandle() && windowHandle()->screen()
@@ -468,11 +473,29 @@ void OverlayWidget::updateGeometry() {
 	if (geometry() == available) {
 		return;
 	}
+	DEBUG_LOG(("Viewer Pos: Setting %1, %2, %3, %4")
+		.arg(available.x())
+		.arg(available.y())
+		.arg(available.width())
+		.arg(available.height()));
 	setGeometry(available);
 }
 
+void OverlayWidget::moveEvent(QMoveEvent *e) {
+	const auto newPos = e->pos();
+	DEBUG_LOG(("Viewer Pos: Moved to %1, %2")
+		.arg(newPos.x())
+		.arg(newPos.y()));
+	OverlayParent::moveEvent(e);
+}
+
 void OverlayWidget::resizeEvent(QResizeEvent *e) {
+	const auto newSize = e->size();
+	DEBUG_LOG(("Viewer Pos: Resized to %1, %2")
+		.arg(newSize.width())
+		.arg(newSize.height()));
 	updateControlsGeometry();
+	OverlayParent::resizeEvent(e);
 }
 
 void OverlayWidget::updateControlsGeometry() {
@@ -1269,6 +1292,7 @@ void OverlayWidget::activateControls() {
 void OverlayWidget::onHideControls(bool force) {
 	if (!force) {
 		if (!_dropdown->isHidden()
+			|| (_streamed && _streamed->controls.hasMenu())
 			|| _menu
 			|| _mousePressed
 			|| (_fullScreenVideo
@@ -1323,9 +1347,7 @@ void OverlayWidget::handleVisibleChanged(bool visible) {
 	if (visible) {
 		const auto screenList = QGuiApplication::screens();
 		DEBUG_LOG(("Viewer Pos: Shown, screen number: %1")
-			.arg(windowHandle()
-				? screenList.indexOf(windowHandle()->screen())
-				: -2));
+			.arg(screenList.indexOf(windowHandle()->screen())));
 
 		moveToScreen();
 	}
@@ -1757,7 +1779,7 @@ Data::FileOrigin OverlayWidget::fileOrigin() const {
 	if (_msgid) {
 		return _msgid;
 	} else if (_photo && _user) {
-		return Data::FileOriginUserPhoto(_user->bareId(), _photo->id);
+		return Data::FileOriginUserPhoto(peerToUser(_user->id), _photo->id);
 	} else if (_photo && _peer && _peer->userpicPhotoId() == _photo->id) {
 		return Data::FileOriginPeerPhoto(_peer->id);
 	}
@@ -1772,7 +1794,7 @@ Data::FileOrigin OverlayWidget::fileOrigin(const Entity &entity) const {
 	}
 	const auto photo = v::get<not_null<PhotoData*>>(entity.data);
 	if (_user) {
-		return Data::FileOriginUserPhoto(_user->bareId(), photo->id);
+		return Data::FileOriginUserPhoto(peerToUser(_user->id), photo->id);
 	} else if (_peer && _peer->userpicPhotoId() == photo->id) {
 		return Data::FileOriginPeerPhoto(_peer->id);
 	}
@@ -1853,10 +1875,7 @@ void OverlayWidget::handleSharedMediaUpdate(SharedMediaWithLastSlice &&update) {
 
 std::optional<OverlayWidget::UserPhotosKey> OverlayWidget::userPhotosKey() const {
 	if (!_msgid && _user && _photo) {
-		return UserPhotosKey {
-			_user->bareId(),
-			_photo->id
-		};
+		return UserPhotosKey{ peerToUser(_user->id), _photo->id };
 	}
 	return std::nullopt;
 }
@@ -2192,8 +2211,10 @@ void OverlayWidget::showDocument(
 
 	_streamingStartPaused = false;
 	displayDocument(document, context, cloud, continueStreaming);
-	preloadData(0);
-	activateControls();
+	if (!isHidden()) {
+		preloadData(0);
+		activateControls();
+	}
 }
 
 void OverlayWidget::displayPhoto(not_null<PhotoData*> photo, HistoryItem *item) {
@@ -2308,6 +2329,11 @@ void OverlayWidget::displayDocument(
 						_staticContent = PrepareStaticImage(path);
 						_touchbarDisplay.fire(TouchBarItemType::Photo);
 					}
+				} else if (!_documentMedia->bytes().isEmpty()) {
+					_staticContent = PrepareStaticImage(_documentMedia->bytes());
+					if (!_staticContent.isNull()) {
+						_touchbarDisplay.fire(TouchBarItemType::Photo);
+					}
 				}
 				location.accessDisable();
 			}
@@ -2385,7 +2411,11 @@ void OverlayWidget::displayDocument(
 	contentSizeChanged();
 	refreshFromLabel(item);
 	_blurred = false;
-	displayFinished();
+	if (_showAsPip && _streamed && !videoIsGifOrUserpic()) {
+		switchToPip();
+	} else {
+		displayFinished();
+	}
 }
 
 void OverlayWidget::updateThemePreviewGeometry() {
@@ -2415,6 +2445,7 @@ void OverlayWidget::displayFinished() {
 	updateControls();
 	if (isHidden()) {
 		Ui::Platform::UpdateOverlayed(this);
+		moveToScreen();
 		if (Platform::IsLinux()) {
 			showFullScreen();
 		} else {
@@ -2473,19 +2504,21 @@ bool OverlayWidget::initStreaming(bool continueStreaming) {
 void OverlayWidget::startStreamingPlayer() {
 	Expects(_streamed != nullptr);
 
-	if (!_streamed->instance.player().paused()
-		&& !_streamed->instance.player().finished()
-		&& !_streamed->instance.player().failed()) {
+	const auto &player = _streamed->instance.player();
+	if (player.playing()) {
 		if (!_streamed->withSound) {
 			return;
 		}
+		_pip = nullptr;
+	} else if (!player.paused() && !player.finished() && !player.failed()) {
 		_pip = nullptr;
 	} else if (_pip && _streamed->withSound) {
 		return;
 	}
 
 	const auto position = _document
-		? _document->session().settings().mediaLastPlaybackPosition(_document->id)
+		? _document->session().settings().mediaLastPlaybackPosition(
+			_document->id)
 		: _photo
 		? _photo->videoStartPosition()
 		: 0;
@@ -2955,8 +2988,10 @@ void OverlayWidget::switchToPip() {
 	const auto document = _document;
 	const auto msgId = _msgid;
 	const auto closeAndContinue = [=] {
+		_showAsPip = false;
 		showDocument(document, document->owner().message(msgId), {}, true);
 	};
+	_showAsPip = true;
 	_pip = std::make_unique<PipWrap>(
 		this,
 		document,
@@ -2964,9 +2999,14 @@ void OverlayWidget::switchToPip() {
 		_streamed->instance.shared(),
 		closeAndContinue,
 		[=] { _pip = nullptr; });
-	close();
-	if (const auto window = Core::App().activeWindow()) {
-		window->activate();
+	if (isHidden()) {
+		clearBeforeHide();
+		clearAfterHide();
+	} else {
+		close();
+		if (const auto window = Core::App().activeWindow()) {
+			window->activate();
+		}
 	}
 }
 
@@ -3076,7 +3116,10 @@ void OverlayWidget::paintEvent(QPaintEvent *e) {
 	const auto r = e->rect();
 	const auto region = e->region();
 	const auto contentShown = _photo || documentContentShown();
-	const auto bgRegion = contentShown
+	const auto opaqueContentShown = contentShown
+		&& (!_document
+			|| (!_document->isVideoMessage() && !_document->sticker()));
+	const auto bgRegion = opaqueContentShown
 		? (region - contentRect())
 		: region;
 
@@ -3363,9 +3406,9 @@ void OverlayWidget::paintTransformedStaticContent(Painter &p) {
 	const auto rect = contentRect();
 
 	PainterHighQualityEnabler hq(p);
-	if ((!_document || !_documentMedia->getStickerLarge())
-		&& (_staticContent.isNull()
-			|| _staticContent.hasAlpha())) {
+	if ((!_document
+		|| (!_document->sticker() && !_document->isVideoMessage()))
+		&& (_staticContent.isNull() || _staticContent.hasAlpha())) {
 		p.fillRect(rect, _transparentBrush);
 	}
 	if (_staticContent.isNull()) {
@@ -4327,42 +4370,50 @@ void OverlayWidget::applyHideWindowWorkaround() {
 #endif // USE_OPENGL_OVERLAY_WIDGET
 }
 
+// #TODO unite and check
+void OverlayWidget::clearBeforeHide() {
+	_sharedMedia = nullptr;
+	_sharedMediaData = std::nullopt;
+	_sharedMediaDataKey = std::nullopt;
+	_userPhotos = nullptr;
+	_userPhotosData = std::nullopt;
+	_collage = nullptr;
+	_collageData = std::nullopt;
+	assignMediaPointer(nullptr);
+	_preloadPhotos.clear();
+	_preloadDocuments.clear();
+	if (_menu) {
+		_menu->hideMenu(true);
+	}
+	_controlsHideTimer.cancel();
+	_controlsState = ControlsShown;
+	_controlsOpacity = anim::value(1, 1);
+	_groupThumbs = nullptr;
+	_groupThumbsRect = QRect();
+}
+
+void OverlayWidget::clearAfterHide() {
+	clearStreaming();
+	destroyThemePreview();
+	_radial.stop();
+	_staticContent = QPixmap();
+	_themePreview = nullptr;
+	_themeApply.destroyDelayed();
+	_themeCancel.destroyDelayed();
+	_themeShare.destroyDelayed();
+}
+
 void OverlayWidget::setVisibleHook(bool visible) {
 	if (!visible) {
 		applyHideWindowWorkaround();
-		_sharedMedia = nullptr;
-		_sharedMediaData = std::nullopt;
-		_sharedMediaDataKey = std::nullopt;
-		_userPhotos = nullptr;
-		_userPhotosData = std::nullopt;
-		_collage = nullptr;
-		_collageData = std::nullopt;
-		assignMediaPointer(nullptr);
-		_preloadPhotos.clear();
-		_preloadDocuments.clear();
-		if (_menu) {
-			_menu->hideMenu(true);
-		}
-		_controlsHideTimer.cancel();
-		_controlsState = ControlsShown;
-		_controlsOpacity = anim::value(1, 1);
-		_groupThumbs = nullptr;
-		_groupThumbsRect = QRect();
+		clearBeforeHide();
 	}
 	OverlayParent::setVisibleHook(visible);
 	if (visible) {
 		QCoreApplication::instance()->installEventFilter(this);
 	} else {
 		QCoreApplication::instance()->removeEventFilter(this);
-
-		clearStreaming();
-		destroyThemePreview();
-		_radial.stop();
-		_staticContent = QPixmap();
-		_themePreview = nullptr;
-		_themeApply.destroyDelayed();
-		_themeCancel.destroyDelayed();
-		_themeShare.destroyDelayed();
+		clearAfterHide();
 	}
 }
 

@@ -10,7 +10,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/abstract_box.h"
 #include "base/unique_qptr.h"
 
-class RPCError;
+namespace MTP {
+class Error;
+} // namespace MTP
 
 namespace Ui {
 class FlatLabel;
@@ -89,12 +91,12 @@ private:
 	using Flag = MTPDchatAdminRights::Flag;
 	using Flags = MTPDchatAdminRights::Flags;
 
-	static MTPChatAdminRights Defaults(not_null<PeerData*> peer);
+	[[nodiscard]] MTPChatAdminRights defaultRights() const;
 
 	not_null<Ui::InputField*> addRankInput();
 	void transferOwnership();
 	void transferOwnershipChecked();
-	bool handleTransferPasswordError(const RPCError &error);
+	bool handleTransferPasswordError(const MTP::Error &error);
 	void requestTransferPassword(not_null<ChannelData*> channel);
 	void sendTransferRequestFrom(
 		QPointer<PasscodeBox> box,
@@ -144,7 +146,7 @@ private:
 	using Flag = MTPDchatBannedRights::Flag;
 	using Flags = MTPDchatBannedRights::Flags;
 
-	static MTPChatBannedRights Defaults(not_null<PeerData*> peer);
+	[[nodiscard]] MTPChatBannedRights defaultRights() const;
 
 	bool canSave() const {
 		return !!_saveCallback;

@@ -139,7 +139,6 @@ public:
 	bool minimizeActiveWindow();
 	[[nodiscard]] QWidget *getFileDialogParent();
 	void notifyFileDialogShown(bool shown);
-	[[nodiscard]] QWidget *getModalParent();
 	void checkSystemDarkMode();
 
 	// Media view interface.
@@ -227,6 +226,7 @@ public:
 	void checkStartUrl();
 	bool openLocalUrl(const QString &url, QVariant context);
 	bool openInternalUrl(const QString &url, QVariant context);
+	[[nodiscard]] QString changelogLink() const;
 
 	// Float player.
 	void setDefaultFloatPlayerDelegate(
@@ -367,7 +367,7 @@ private:
 	crl::time _shouldLockAt = 0;
 	base::Timer _autoLockTimer;
 
-	base::Timer _saveSettingsTimer;
+	std::optional<base::Timer> _saveSettingsTimer;
 
 	struct LeaveSubscription {
 		LeaveSubscription(

@@ -360,8 +360,12 @@ void PasscodeBox::closeReplacedBy() {
 	}
 }
 
-void PasscodeBox::setPasswordFail(const RPCError &error) {
-	if (MTP::isFloodError(error)) {
+void PasscodeBox::setPasswordFail(const MTP::Error &error) {
+	setPasswordFail(error.type());
+}
+
+void PasscodeBox::setPasswordFail(const QString &type) {
+	if (MTP::IsFloodError(type)) {
 		closeReplacedBy();
 		_setRequest = 0;
 
@@ -378,20 +382,19 @@ void PasscodeBox::setPasswordFail(const RPCError &error) {
 
 	closeReplacedBy();
 	_setRequest = 0;
-	const auto &err = error.type();
-	if (err == qstr("PASSWORD_HASH_INVALID")
-		|| err == qstr("SRP_PASSWORD_CHANGED")) {
+	if (type == qstr("PASSWORD_HASH_INVALID")
+		|| type == qstr("SRP_PASSWORD_CHANGED")) {
 		if (_oldPasscode->isHidden()) {
 			_passwordReloadNeeded.fire({});
 			closeBox();
 		} else {
 			badOldPasscode();
 		}
-	} else if (err == qstr("SRP_ID_INVALID")) {
+	} else if (type == qstr("SRP_ID_INVALID")) {
 		handleSrpIdInvalid();
-	//} else if (err == qstr("NEW_PASSWORD_BAD")) {
-	//} else if (err == qstr("NEW_SALT_INVALID")) {
-	} else if (err == qstr("EMAIL_INVALID")) {
+	//} else if (type == qstr("NEW_PASSWORD_BAD")) {
+	//} else if (type == qstr("NEW_SALT_INVALID")) {
+	} else if (type == qstr("EMAIL_INVALID")) {
 		_emailError = tr::lng_cloud_password_bad_email(tr::now);
 		_recoverEmail->setFocus();
 		_recoverEmail->showError();
@@ -402,10 +405,10 @@ void PasscodeBox::setPasswordFail(const RPCError &error) {
 void PasscodeBox::setPasswordFail(
 		const QByteArray &newPasswordBytes,
 		const QString &email,
-		const RPCError &error) {
+		const MTP::Error &error) {
 	const auto prefix = qstr("EMAIL_UNCONFIRMED_");
 	if (error.type().startsWith(prefix)) {
-		const auto codeLength = error.type().mid(prefix.size()).toInt();
+		const auto codeLength = error.type().midRef(prefix.size()).toInt();
 
 		closeReplacedBy();
 		_setRequest = 0;
@@ -432,9 +435,9 @@ void PasscodeBox::validateEmail(
 		)).done([=](const MTPBool &result) {
 			*set = true;
 			setPasswordDone(newPasswordBytes);
-		}).fail([=](const RPCError &error) {
+		}).fail([=](const MTP::Error &error) {
 			_setRequest = 0;
-			if (MTP::isFloodError(error)) {
+			if (MTP::IsFloodError(error)) {
 				errors->fire(tr::lng_flood_error(tr::now));
 			} else if (error.type() == qstr("CODE_INVALID")) {
 				errors->fire(tr::lng_signin_wrong_code(tr::now));
@@ -461,7 +464,7 @@ void PasscodeBox::validateEmail(
 		)).done([=](const MTPBool &result) {
 			_setRequest = 0;
 			resent->fire(tr::lng_cloud_password_resent(tr::now));
-		}).fail([=](const RPCError &error) {
+		}).fail([=](const MTP::Error &error) {
 			_setRequest = 0;
 			errors->fire(Lang::Hard::ServerError());
 		}).send();
@@ -681,13 +684,16 @@ void PasscodeBox::serverError() {
 	closeBox();
 }
 
-bool PasscodeBox::handleCustomCheckError(const RPCError &error) {
-	const auto &type = error.type();
-	if (MTP::isFloodError(error)
+bool PasscodeBox::handleCustomCheckError(const MTP::Error &error) {
+	return handleCustomCheckError(error.type());
+}
+
+bool PasscodeBox::handleCustomCheckError(const QString &type) {
+	if (MTP::IsFloodError(type)
 		|| type == qstr("PASSWORD_HASH_INVALID")
 		|| type == qstr("SRP_PASSWORD_CHANGED")
 		|| type == qstr("SRP_ID_INVALID")) {
-		setPasswordFail(error);
+		setPasswordFail(type);
 		return true;
 	}
 	return false;
@@ -695,8 +701,6 @@ bool PasscodeBox::handleCustomCheckError(const RPCError &error) {
 
 void PasscodeBox::sendClearCloudPassword(
 		const Core::CloudPasswordResult &check) {
-	const auto newPasswordData = QByteArray();
-	const auto newPasswordHash = QByteArray();
 	const auto hint = QString();
 	const auto email = QString();
 	const auto flags = MTPDaccount_passwordInputSettings::Flag::f_new_algo
@@ -714,7 +718,7 @@ void PasscodeBox::sendClearCloudPassword(
 			MTPSecureSecretSettings())
 	)).done([=](const MTPBool &result) {
 		setPasswordDone({});
-	}).fail([=](const RPCError &error) mutable {
+	}).fail([=](const MTP::Error &error) mutable {
 		setPasswordFail({}, QString(), error);
 	}).handleFloodErrors().send();
 }
@@ -745,7 +749,7 @@ void PasscodeBox::setNewCloudPassword(const QString &newPassword) {
 			MTPSecureSecretSettings())
 	)).done([=](const MTPBool &result) {
 		setPasswordDone(newPasswordBytes);
-	}).fail([=](const RPCError &error) {
+	}).fail([=](const MTP::Error &error) {
 		setPasswordFail(newPasswordBytes, email, error);
 	}).handleFloodErrors().send();
 }
@@ -800,7 +804,7 @@ void PasscodeBox::changeCloudPassword(
 				sendChangeCloudPassword(check, newPassword, secureSecret);
 			});
 		}
-	}).fail([=](const RPCError &error) {
+	}).fail([=](const MTP::Error &error) {
 		setPasswordFail(error);
 	}).handleFloodErrors().send();
 }
@@ -842,7 +846,7 @@ void PasscodeBox::resetSecret(
 			const auto empty = QByteArray();
 			sendChangeCloudPassword(check, newPassword, empty);
 		});
-	}).fail([=](const RPCError &error) {
+	}).fail([=](const MTP::Error &error) {
 		_setRequest = 0;
 		if (error.type() == qstr("SRP_ID_INVALID")) {
 			handleSrpIdInvalid();
@@ -891,7 +895,7 @@ void PasscodeBox::sendChangeCloudPassword(
 				MTP_long(newSecureSecretId)))
 	)).done([=](const MTPBool &result) {
 		setPasswordDone(newPasswordBytes);
-	}).fail([=](const RPCError &error) {
+	}).fail([=](const MTP::Error &error) {
 		setPasswordFail(newPasswordBytes, QString(), error);
 	}).handleFloodErrors().send();
 }
@@ -939,7 +943,7 @@ void PasscodeBox::recoverByEmail() {
 		_api.request(MTPauth_RequestPasswordRecovery(
 		)).done([=](const MTPauth_PasswordRecovery &result) {
 			recoverStarted(result);
-		}).fail([=](const RPCError &error) {
+		}).fail([=](const MTP::Error &error) {
 			recoverStartFail(error);
 		}).send();
 	} else {
@@ -977,7 +981,7 @@ void PasscodeBox::recoverStarted(const MTPauth_PasswordRecovery &result) {
 	recover();
 }
 
-void PasscodeBox::recoverStartFail(const RPCError &error) {
+void PasscodeBox::recoverStartFail(const MTP::Error &error) {
 	_pattern = QString();
 	closeBox();
 }
@@ -1055,7 +1059,7 @@ void RecoverBox::submit() {
 			MTP_string(code)
 		)).done([=](const MTPauth_Authorization &result) {
 			codeSubmitDone(result);
-		}).fail([=](const RPCError &error) {
+		}).fail([=](const MTP::Error &error) {
 			codeSubmitFail(error);
 		}).handleFloodErrors().send();
 	});
@@ -1087,8 +1091,8 @@ void RecoverBox::codeSubmitDone(const MTPauth_Authorization &result) {
 		Ui::LayerOption::CloseOther);
 }
 
-void RecoverBox::codeSubmitFail(const RPCError &error) {
-	if (MTP::isFloodError(error)) {
+void RecoverBox::codeSubmitFail(const MTP::Error &error) {
+	if (MTP::IsFloodError(error)) {
 		_submitRequest = 0;
 		_error = tr::lng_flood_error(tr::now);
 		update();
@@ -1149,9 +1153,9 @@ RecoveryEmailValidation ConfirmRecoveryEmail(
 					Box<InformBox>(tr::lng_cloud_password_was_set(tr::now)),
 					Ui::LayerOption::CloseOther);
 			}
-		}).fail([=](const RPCError &error) {
+		}).fail([=](const MTP::Error &error) {
 			*requestId = 0;
-			if (MTP::isFloodError(error)) {
+			if (MTP::IsFloodError(error)) {
 				errors->fire(tr::lng_flood_error(tr::now));
 			} else if (error.type() == qstr("CODE_INVALID")) {
 				errors->fire(tr::lng_signin_wrong_code(tr::now));
@@ -1177,7 +1181,7 @@ RecoveryEmailValidation ConfirmRecoveryEmail(
 		)).done([=](const MTPBool &result) {
 			*requestId = 0;
 			resent->fire(tr::lng_cloud_password_resent(tr::now));
-		}).fail([=](const RPCError &error) {
+		}).fail([=](const MTP::Error &error) {
 			*requestId = 0;
 			errors->fire(Lang::Hard::ServerError());
 		}).send();
@@ -1196,7 +1200,7 @@ RecoveryEmailValidation ConfirmRecoveryEmail(
 }
 
 [[nodiscard]] object_ptr<Ui::GenericBox> PrePasswordErrorBox(
-		const RPCError &error,
+		const MTP::Error &error,
 		not_null<Main::Session*> session,
 		TextWithEntities &&about) {
 	const auto type = [&] {

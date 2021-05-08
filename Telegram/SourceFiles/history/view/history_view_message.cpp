@@ -102,6 +102,7 @@ void KeyboardStyle::paintButtonIcon(
 		switch (type) {
 		case Type::Url:
 		case Type::Auth: return &st::msgBotKbUrlIcon;
+		case Type::Buy: return &st::msgBotKbPaymentIcon;
 		case Type::SwitchInlineSame:
 		case Type::SwitchInline: return &st::msgBotKbSwitchPmIcon;
 		}
@@ -124,6 +125,7 @@ int KeyboardStyle::minButtonWidth(
 	switch (type) {
 	case Type::Url:
 	case Type::Auth: iconWidth = st::msgBotKbUrlIcon.width(); break;
+	case Type::Buy: iconWidth = st::msgBotKbPaymentIcon.width(); break;
 	case Type::SwitchInlineSame:
 	case Type::SwitchInline: iconWidth = st::msgBotKbSwitchPmIcon.width(); break;
 	case Type::Callback:
@@ -1196,7 +1198,6 @@ bool Message::hasFromPhoto() const {
 	}
 	switch (context()) {
 	case Context::AdminLog:
-	//case Context::Feed: // #feed
 		return true;
 	case Context::History:
 	case Context::Pinned:
@@ -2059,6 +2060,18 @@ HistoryMessageReply *Message::displayedReply() const {
 	return nullptr;
 }
 
+bool Message::toggleSelectionByHandlerClick(
+		const ClickHandlerPtr &handler) const {
+	if (_comments && _comments->link == handler) {
+		return true;
+	} else if (const auto media = this->media()) {
+		if (media->toggleSelectionByHandlerClick(handler)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 bool Message::displayPinIcon() const {
 	return data()->isPinned() && !isPinnedContext();
 }
@@ -2066,7 +2079,6 @@ bool Message::displayPinIcon() const {
 bool Message::hasFromName() const {
 	switch (context()) {
 	case Context::AdminLog:
-	//case Context::Feed: // #feed
 		return true;
 	case Context::History:
 	case Context::Pinned:
@@ -2113,12 +2125,9 @@ bool Message::displayForwardedFrom() const {
 			}
 		}
 		const auto media = this->media();
-		return item->Has<HistoryMessageVia>()
-			|| !media
+		return !media
 			|| !media->isDisplayed()
-			|| !media->hideForwardedFrom()
-			|| (forwarded->originalSender
-				&& forwarded->originalSender->isChannel());
+			|| !media->hideForwardedFrom();
 	}
 	return false;
 }

@@ -5,6 +5,7 @@ icon: Telegram/Resources/art/icon512@2x.png
 base: core20
 grade: stable
 confinement: strict
+compression: lzo
 
 architectures:
   - build-on: amd64
@@ -38,6 +39,8 @@ apps:
       - unity7
       - wayland
       - x11
+    slots:
+      - tdesktop-mpris
 
 plugs:
   # Support for common GTK themes
@@ -56,11 +59,18 @@ plugs:
     target: $SNAP/data-dir/sounds
     default-provider: gtk-common-themes
 
+slots:
+  tdesktop-mpris:
+    interface: mpris
+    name: tdesktop
+
 layout:
   /usr/share/alsa:
     bind: $SNAP/usr/share/alsa
   /usr/share/X11:
     bind: $SNAP/usr/share/X11
+  /usr/lib/$SNAPCRAFT_ARCH_TRIPLET/webkit2gtk-4.0:
+    bind: $SNAP/usr/lib/$SNAPCRAFT_ARCH_TRIPLET/webkit2gtk-4.0
 
 parts:
   telegram:
@@ -74,11 +84,13 @@ parts:
       - python
       - libasound2-dev
       - libglib2.0-dev
+      - libglibmm-2.4-dev
       - libgtk-3-dev
       - liblzma-dev
       - libopus-dev
       - libpulse-dev
       - libssl-dev
+      - libwebkit2gtk-4.0-dev
       - libxcb1-dev
       - libxcb-keysyms1-dev
       - libxcb-record0-dev
@@ -87,11 +99,13 @@ parts:
     stage-packages:
       - libasound2
       - libglib2.0-0
+      - libglibmm-2.4-1v5
       - libgtk-3-0
       - liblzma5
       - libopus0
       - libpulse0
       - libssl1.1
+      - libwebkit2gtk-4.0-37
       - libxcb1
       - libxcb-keysyms1
       - libxcb-record0
@@ -143,7 +157,7 @@ parts:
     prime: [-./*]
 
   desktop-qt5:
-    source: https://github.com/ubuntu/snapcraft-desktop-helpers.git
+    source: https://github.com/desktop-app/snapcraft-desktop-helpers.git
     source-subdir: qt
     plugin: make
     make-parameters: ["FLAVOR=qt5"]
@@ -390,7 +404,7 @@ parts:
         -I $SNAPCRAFT_STAGE/usr/include \
         -L $SNAPCRAFT_STAGE/usr/lib/$SNAPCRAFT_ARCH_TRIPLET
 
-      make -j$(nproc)
+      make -j$SNAPCRAFT_PARALLEL_BUILD_COUNT
       make INSTALL_ROOT="$SNAPCRAFT_PART_INSTALL" install
     stage:
       - -./usr/lib/$SNAPCRAFT_ARCH_TRIPLET/libjpeg.so.8.2.2
@@ -410,7 +424,7 @@ parts:
   webrtc:
     source: https://github.com/desktop-app/tg_owt.git
     source-depth: 1
-    source-commit: be23804afce3bb2e80a1d57a7c1318c71b82b7de
+    source-commit: 7f965710b93c4dadd7e6f1ac739e708694df7929
     plugin: cmake
     build-packages:
       - yasm

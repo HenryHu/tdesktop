@@ -17,6 +17,11 @@ class UserData;
 class ChatData;
 class ChannelData;
 
+using ChatAdminRight = MTPDchatAdminRights::Flag;
+using ChatRestriction = MTPDchatBannedRights::Flag;
+using ChatAdminRights = MTPDchatAdminRights::Flags;
+using ChatRestrictions = MTPDchatBannedRights::Flags;
+
 namespace Ui {
 class EmptyUserpic;
 } // namespace Ui
@@ -30,22 +35,12 @@ namespace Data {
 
 class Session;
 class GroupCall;
+class CloudImageView;
 
 int PeerColorIndex(PeerId peerId);
-int PeerColorIndex(int32 bareId);
+int PeerColorIndex(BareId bareId);
 style::color PeerUserpicColor(PeerId peerId);
 PeerId FakePeerIdForJustName(const QString &name);
-
-} // namespace Data
-
-using ChatAdminRight = MTPDchatAdminRights::Flag;
-using ChatRestriction = MTPDchatBannedRights::Flag;
-using ChatAdminRights = MTPDchatAdminRights::Flags;
-using ChatRestrictions = MTPDchatBannedRights::Flags;
-
-namespace Data {
-
-class CloudImageView;
 
 class RestrictionCheckResult {
 public:
@@ -99,6 +94,11 @@ struct UnavailableReason {
 		return !(*this == other);
 	}
 };
+
+[[nodiscard]] ChatRestrictions ChatBannedRightsFlags(
+	const MTPChatBannedRights &rights);
+[[nodiscard]] TimeId ChatBannedRightsUntilDate(
+	const MTPChatBannedRights &rights);
 
 } // namespace Data
 
@@ -161,6 +161,7 @@ public:
 	[[nodiscard]] bool isFake() const;
 	[[nodiscard]] bool isMegagroup() const;
 	[[nodiscard]] bool isBroadcast() const;
+	[[nodiscard]] bool isGigagroup() const;
 	[[nodiscard]] bool isRepliesChat() const;
 	[[nodiscard]] bool sharedMediaInfo() const {
 		return isSelf() || isRepliesChat();
@@ -171,7 +172,7 @@ public:
 			|| (id == kServiceNotificationsId);
 	}
 	[[nodiscard]] bool isServiceUser() const {
-		return isUser() && !(id % 1000);
+		return isUser() && !(id.value % 1000);
 	}
 
 	[[nodiscard]] std::optional<TimeId> notifyMuteUntil() const {
@@ -237,10 +238,6 @@ public:
 	[[nodiscard]] const QString &shortName() const;
 	[[nodiscard]] const Ui::Text::String &topBarNameText() const;
 	[[nodiscard]] QString userName() const;
-
-	[[nodiscard]] int32 bareId() const {
-		return int32(uint32(id & 0xFFFFFFFFULL));
-	}
 
 	[[nodiscard]] const base::flat_set<QString> &nameWords() const {
 		return _nameWords;
@@ -386,7 +383,11 @@ public:
 	}
 	void setLoadedStatus(LoadedStatus status);
 
+	[[nodiscard]] TimeId messagesTTL() const;
+	void setMessagesTTL(TimeId period);
+
 	[[nodiscard]] Data::GroupCall *groupCall() const;
+	[[nodiscard]] PeerId groupCallDefaultJoinAs() const;
 
 	const PeerId id;
 	QString name;
@@ -399,10 +400,7 @@ protected:
 		const QString &newName,
 		const QString &newNameOrPhone,
 		const QString &newUsername);
-	void updateUserpic(
-		PhotoId photoId,
-		MTP::DcId dcId,
-		const MTPFileLocation &small);
+	void updateUserpic(PhotoId photoId, MTP::DcId dcId);
 	void clearUserpic();
 
 private:
@@ -429,6 +427,8 @@ private:
 	base::flat_set<QChar> _nameFirstLetters;
 
 	crl::time _lastFullUpdate = 0;
+
+	TimeId _ttlPeriod = 0;
 	bool _hasPinnedMessages = false;
 
 	Settings _settings = { kSettingsUnknown };

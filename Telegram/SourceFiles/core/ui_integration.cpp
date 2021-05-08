@@ -16,11 +16,76 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/emoji_config.h"
 #include "lang/lang_keys.h"
 #include "platform/platform_specific.h"
+#include "boxes/url_auth_box.h"
 #include "main/main_account.h"
 #include "main/main_session.h"
+#include "main/main_app_config.h"
 #include "mainwindow.h"
+#include "facades.h" // Global::ScreenIsLocked.
 
 namespace Core {
+namespace {
+
+const auto kGoodPrefix = u"https://"_q;
+const auto kBadPrefix = u"http://"_q;
+
+[[nodiscard]] QUrl UrlForAutoLogin(const QString &url) {
+	return (url.startsWith(kGoodPrefix, Qt::CaseInsensitive)
+		|| url.startsWith(kBadPrefix, Qt::CaseInsensitive))
+		? QUrl(url)
+		: QUrl();
+}
+
+[[nodiscard]] QString DomainForAutoLogin(const QUrl &url) {
+	return url.isValid() ? url.host().toLower() : QString();
+}
+
+[[nodiscard]] QString UrlWithAutoLoginToken(
+		const QString &url,
+		QUrl parsed,
+		const QString &domain) {
+	const auto &config = Core::App().activeAccount().appConfig();
+	const auto token = config.get<QString>("autologin_token", {});
+	const auto domains = config.get<std::vector<QString>>(
+		"autologin_domains",
+		{});
+	if (token.isEmpty()
+		|| domain.isEmpty()
+		|| !ranges::contains(domains, domain)) {
+		return url;
+	}
+	const auto added = "autologin_token=" + token;
+	parsed.setQuery(parsed.hasQuery()
+		? (parsed.query() + '&' + added)
+		: added);
+	if (url.startsWith(kBadPrefix, Qt::CaseInsensitive)) {
+		parsed.setScheme("https");
+	}
+	return QString::fromUtf8(parsed.toEncoded());
+}
+
+[[nodiscard]] bool BotAutoLogin(
+		const QString &url,
+		const QString &domain,
+		QVariant context) {
+	auto &account = Core::App().activeAccount();
+	const auto &config = account.appConfig();
+	const auto domains = config.get<std::vector<QString>>(
+		"url_auth_domains",
+		{});
+	if (!account.sessionExists()
+		|| domain.isEmpty()
+		|| !ranges::contains(domains, domain)) {
+		return false;
+	}
+	const auto good = url.startsWith(kBadPrefix, Qt::CaseInsensitive)
+		? (kGoodPrefix + url.mid(kBadPrefix.size()))
+		: url;
+	UrlAuthBox::Activate(&account.session(), good, context);
+	return true;
+}
+
+} // namespace
 
 void UiIntegration::postponeCall(FnMut<void()> &&callable) {
 	Sandbox::Instance().postponeCall(std::move(callable));
@@ -32,10 +97,6 @@ void UiIntegration::registerLeaveSubscription(not_null<QWidget*> widget) {
 
 void UiIntegration::unregisterLeaveSubscription(not_null<QWidget*> widget) {
 	Core::App().unregisterLeaveSubscription(widget);
-}
-
-void UiIntegration::writeLogEntry(const QString &entry) {
-	Logs::writeMain(entry);
 }
 
 QString UiIntegration::emojiCacheFolder() {
@@ -52,10 +113,8 @@ void UiIntegration::activationFromTopPanel() {
 	Platform::IgnoreApplicationActivationRightNow();
 }
 
-void UiIntegration::startFontsBegin() {
-}
-
-void UiIntegration::startFontsEnd() {
+bool UiIntegration::screenIsLocked() {
+	return Global::ScreenIsLocked();
 }
 
 QString UiIntegration::timeFormat() {
@@ -151,7 +210,12 @@ bool UiIntegration::handleUrlClick(
 		return true;
 	}
 
-	File::OpenUrl(url);
+	auto parsed = UrlForAutoLogin(url);
+	const auto domain = DomainForAutoLogin(parsed);
+	const auto skip = context.value<ClickHandlerContext>().skipBotAutoLogin;
+	if (skip || !BotAutoLogin(url, domain, context)) {
+		File::OpenUrl(UrlWithAutoLoginToken(url, std::move(parsed), domain));
+	}
 	return true;
 
 }
@@ -163,7 +227,7 @@ rpl::producer<> UiIntegration::forcePopupMenuHideRequests() {
 QString UiIntegration::convertTagToMimeTag(const QString &tagId) {
 	if (TextUtilities::IsMentionLink(tagId)) {
 		if (const auto session = Core::App().activeAccount().maybeSession()) {
-			return tagId + ':' + QString::number(session->userId());
+			return tagId + ':' + QString::number(session->userId().bare);
 		}
 	}
 	return tagId;
@@ -175,11 +239,12 @@ const Ui::Emoji::One *UiIntegration::defaultEmojiVariant(
 		return emoji;
 	}
 	const auto nonColored = emoji->nonColoredId();
-	const auto it = cEmojiVariants().constFind(nonColored);
-	const auto result = (it != cEmojiVariants().cend())
-		? emoji->variant(it.value())
+	const auto &variants = Core::App().settings().emojiVariants();
+	const auto i = variants.find(nonColored);
+	const auto result = (i != end(variants))
+		? emoji->variant(i->second)
 		: emoji;
-	AddRecentEmoji(result);
+	Core::App().settings().incrementRecentEmoji(result);
 	return result;
 }
 

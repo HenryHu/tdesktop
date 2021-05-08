@@ -54,14 +54,14 @@ using UpdateFlag = Data::PeerUpdate::Flag;
 
 namespace Data {
 
-int PeerColorIndex(int32 bareId) {
-	const auto index = std::abs(bareId) % 7;
+int PeerColorIndex(BareId bareId) {
+	const auto index = bareId % 7;
 	const int map[] = { 0, 7, 4, 1, 6, 3, 5 };
 	return map[index];
 }
 
 int PeerColorIndex(PeerId peerId) {
-	return PeerColorIndex(peerToBareInt(peerId));
+	return PeerColorIndex(peerId.value & PeerId::kChatTypeMask);
 }
 
 style::color PeerUserpicColor(PeerId peerId) {
@@ -110,9 +110,9 @@ void PeerClickHandler::onClick(ClickContext context) const {
 			&& (!currentPeer->isChannel()
 				|| currentPeer->asChannel()->linkedChat() != clickedChannel)) {
 			Ui::ShowMultilineToast({
-				.text = (_peer->isMegagroup()
+				.text = { _peer->isMegagroup()
 					? tr::lng_group_not_accessible(tr::now)
-					: tr::lng_channel_not_accessible(tr::now)),
+					: tr::lng_channel_not_accessible(tr::now) },
 			});
 		} else {
 			window->showPeerHistory(
@@ -373,28 +373,23 @@ Data::FileOrigin PeerData::userpicOrigin() const {
 
 Data::FileOrigin PeerData::userpicPhotoOrigin() const {
 	return (isUser() && userpicPhotoId())
-		? Data::FileOriginUserPhoto(bareId(), userpicPhotoId())
+		? Data::FileOriginUserPhoto(peerToUser(id).bare, userpicPhotoId())
 		: Data::FileOrigin();
 }
 
-void PeerData::updateUserpic(
-		PhotoId photoId,
-		MTP::DcId dcId,
-		const MTPFileLocation &location) {
-	setUserpicChecked(photoId, location.match([&](
-			const MTPDfileLocationToBeDeprecated &deprecated) {
-		return ImageLocation(
+void PeerData::updateUserpic(PhotoId photoId, MTP::DcId dcId) {
+	setUserpicChecked(
+		photoId,
+		ImageLocation(
 			{ StorageFileLocation(
 				dcId,
-				isSelf() ? peerToUser(id) : 0,
+				isSelf() ? peerToUser(id) : UserId(),
 				MTP_inputPeerPhotoFileLocation(
 					MTP_flags(0),
 					input,
-					deprecated.vvolume_id(),
-					deprecated.vlocal_id())) },
+					MTP_long(photoId))) },
 			kUserpicSize,
-			kUserpicSize);
-	}));
+			kUserpicSize));
 }
 
 void PeerData::clearUserpic() {
@@ -407,13 +402,6 @@ void PeerData::setUserpicChecked(
 	if (_userpicPhotoId != photoId || _userpic.location() != location) {
 		setUserpic(photoId, location);
 		session().changes().peerUpdated(this, UpdateFlag::Photo);
-		//if (const auto channel = asChannel()) { // #feed
-		//	if (const auto feed = channel->feed()) {
-		//		owner().notifyFeedUpdated(
-		//			feed,
-		//			Data::FeedUpdateFlag::ChannelPhoto);
-		//	}
-		//}
 	}
 }
 
@@ -429,9 +417,9 @@ QString PeerData::computeUnavailableReason() const {
 	const auto skip = config.get<std::vector<QString>>(
 		"ignore_restriction_reasons",
 		std::vector<QString>());
-	auto &&filtered = ranges::view::all(
+	auto &&filtered = ranges::views::all(
 		list
-	) | ranges::view::filter([&](const Data::UnavailableReason &reason) {
+	) | ranges::views::filter([&](const Data::UnavailableReason &reason) {
 		return !ranges::contains(skip, reason.reason);
 	});
 	const auto first = filtered.begin();
@@ -757,11 +745,15 @@ bool PeerData::isFake() const {
 }
 
 bool PeerData::isMegagroup() const {
-	return isChannel() ? asChannel()->isMegagroup() : false;
+	return isChannel() && asChannel()->isMegagroup();
 }
 
 bool PeerData::isBroadcast() const {
-	return isChannel() ? asChannel()->isBroadcast() : false;
+	return isChannel() && asChannel()->isBroadcast();
+}
+
+bool PeerData::isGigagroup() const {
+	return isChannel() && asChannel()->isGigagroup();
 }
 
 bool PeerData::isRepliesChat() const {
@@ -907,7 +899,7 @@ bool PeerData::canManageGroupCall() const {
 	if (const auto chat = asChat()) {
 		return chat->amCreator()
 			|| (chat->adminRights() & ChatAdminRight::f_manage_call);
-	} else if (const auto group = asMegagroup()) {
+	} else if (const auto group = asChannel()) {
 		return group->amCreator()
 			|| (group->adminRights() & ChatAdminRight::f_manage_call);
 	}
@@ -917,10 +909,19 @@ bool PeerData::canManageGroupCall() const {
 Data::GroupCall *PeerData::groupCall() const {
 	if (const auto chat = asChat()) {
 		return chat->groupCall();
-	} else if (const auto group = asMegagroup()) {
+	} else if (const auto group = asChannel()) {
 		return group->groupCall();
 	}
 	return nullptr;
+}
+
+PeerId PeerData::groupCallDefaultJoinAs() const {
+	if (const auto chat = asChat()) {
+		return chat->groupCallDefaultJoinAs();
+	} else if (const auto group = asChannel()) {
+		return group->groupCallDefaultJoinAs();
+	}
+	return 0;
 }
 
 void PeerData::setIsBlocked(bool is) {
@@ -943,6 +944,19 @@ void PeerData::setIsBlocked(bool is) {
 
 void PeerData::setLoadedStatus(LoadedStatus status) {
 	_loadedStatus = status;
+}
+
+TimeId PeerData::messagesTTL() const {
+	return _ttlPeriod;
+}
+
+void PeerData::setMessagesTTL(TimeId period) {
+	if (_ttlPeriod != period) {
+		_ttlPeriod = period;
+		session().changes().peerUpdated(
+			this,
+			Data::PeerUpdate::Flag::MessagesTTL);
+	}
 }
 
 namespace Data {
@@ -1151,6 +1165,18 @@ std::optional<int> ResolvePinnedCount(
 	return (slice.count.has_value() && old.count.has_value())
 		? std::make_optional(*slice.count + *old.count)
 		: std::nullopt;
+}
+
+ChatRestrictions ChatBannedRightsFlags(const MTPChatBannedRights &rights) {
+	return rights.match([](const MTPDchatBannedRights &data) {
+		return data.vflags().v;
+	});
+}
+
+TimeId ChatBannedRightsUntilDate(const MTPChatBannedRights &rights) {
+	return rights.match([](const MTPDchatBannedRights &data) {
+		return data.vuntil_date().v;
+	});
 }
 
 } // namespace Data

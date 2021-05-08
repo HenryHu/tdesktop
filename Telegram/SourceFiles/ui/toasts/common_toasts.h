@@ -12,7 +12,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Ui {
 
 struct MultilineToastArgs {
+	QWidget *parentOverride = nullptr;
 	TextWithEntities text;
+	crl::time duration = 0;
 };
 
 void ShowMultilineToast(MultilineToastArgs &&args);

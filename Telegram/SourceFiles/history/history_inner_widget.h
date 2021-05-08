@@ -35,6 +35,7 @@ class SessionController;
 
 namespace Ui {
 class PopupMenu;
+enum class ReportReason;
 } // namespace Ui
 
 class HistoryWidget;
@@ -111,6 +112,9 @@ public:
 	int historyTop() const;
 	int historyDrawTop() const;
 
+	void setChooseReportReason(Ui::ReportReason reason);
+	void clearChooseReportReason();
+
 	// -1 if should not be visible, -2 if bad history()
 	int itemTop(const HistoryItem *item) const;
 	int itemTop(const Element *view) const;
@@ -148,7 +152,7 @@ protected:
 	void keyPressEvent(QKeyEvent *e) override;
 	void contextMenuEvent(QContextMenuEvent *e) override;
 
-public slots:
+public Q_SLOTS:
 	void onParentGeometryChanged();
 
 	void onTouchSelect();
@@ -312,6 +316,7 @@ private:
 	void deleteAsGroup(FullMsgId itemId);
 	void reportItem(FullMsgId itemId);
 	void reportAsGroup(FullMsgId itemId);
+	void reportItems(MessageIdsList ids);
 	void blockSenderItem(FullMsgId itemId);
 	void blockSenderAsGroup(FullMsgId itemId);
 	void copySelectedText();
@@ -350,6 +355,7 @@ private:
 
 	style::cursor _cursor = style::cur_default;
 	SelectedItems _selected;
+	std::optional<Ui::ReportReason> _chooseForReportReason;
 
 	base::flat_set<not_null<const HistoryItem*>> _animatedStickersPlayed;
 	base::flat_map<

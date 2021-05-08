@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_list_widget.h"
 
+#include "base/unixtime.h"
 #include "history/history_message.h"
 #include "history/history_item_components.h"
 #include "history/history_item_text.h"
@@ -524,6 +525,11 @@ void ListWidget::updateHighlightedMessage() {
 	_highlightedMessageId = FullMsgId();
 }
 
+void ListWidget::clearHighlightedMessage() {
+	_highlightedMessageId = FullMsgId();
+	updateHighlightedMessage();
+}
+
 void ListWidget::checkUnreadBarCreation() {
 	if (!_bar.element) {
 		if (auto data = _delegate->listMessagesBar(_items); data.bar.element) {
@@ -799,9 +805,9 @@ auto ListWidget::collectSelectedItems() const -> SelectedItems {
 
 MessageIdsList ListWidget::collectSelectedIds() const {
 	const auto selected = collectSelectedItems();
-	return ranges::view::all(
+	return ranges::views::all(
 		selected
-	) | ranges::view::transform([](const SelectedItem &item) {
+	) | ranges::views::transform([](const SelectedItem &item) {
 		return item.msgId;
 	}) | ranges::to_vector;
 }
@@ -1636,7 +1642,7 @@ TextForMimeData ListWidget::getSelectedText() const {
 		wrapItem(group->items.back(), HistoryGroupText(group));
 	};
 
-	for (const auto [itemId, data] : selected) {
+	for (const auto &[itemId, data] : selected) {
 		if (const auto item = session().data().message(itemId)) {
 			if (const auto group = session().data().groups().find(item)) {
 				if (groups.contains(group)) {
@@ -2178,16 +2184,10 @@ void ListWidget::mouseActionFinish(
 	repaintItem(pressState.itemId);
 
 	const auto toggleByHandler = [&](const ClickHandlerPtr &handler) {
-		if (_overElement) {
-			// If we are in selecting items mode perhaps we want to
-			// toggle selection instead of activating the pressed link.
-			if (const auto media = _overElement->media()) {
-				if (media->toggleSelectionByHandlerClick(handler)) {
-					return true;
-				}
-			}
-		}
-		return false;
+		// If we are in selecting items mode perhaps we want to
+		// toggle selection instead of activating the pressed link.
+		return _overElement
+			&& _overElement->toggleSelectionByHandlerClick(handler);
 	};
 
 	auto activated = ClickHandler::unpressed();
@@ -2220,6 +2220,7 @@ void ListWidget::mouseActionFinish(
 						? (ElementDelegate*)weak
 						: nullptr;
 				},
+				.sessionWindow = base::make_weak(_controller.get()),
 			})
 		});
 		return;
@@ -2248,7 +2249,7 @@ void ListWidget::mouseActionFinish(
 		} else if (_selectedTextItem && !_pressWasInactive) {
 			if (_selectedTextRange.from == _selectedTextRange.to) {
 				clearTextSelection();
-				App::wnd()->setInnerFocus();
+				_controller->widget()->setInnerFocus();
 			}
 		}
 	}
@@ -2725,8 +2726,25 @@ rpl::producer<FullMsgId> ListWidget::editMessageRequested() const {
 	return _requestedToEditMessage.events();
 }
 
-void ListWidget::editMessageRequestNotify(FullMsgId item) {
+void ListWidget::editMessageRequestNotify(FullMsgId item) const {
 	_requestedToEditMessage.fire(std::move(item));
+}
+
+bool ListWidget::lastMessageEditRequestNotify() const {
+	const auto now = base::unixtime::now();
+	auto proj = [&](not_null<Element*> view) {
+		return view->data()->allowsEdit(now);
+	};
+	const auto &list = ranges::views::reverse(_items);
+	const auto it = ranges::find_if(list, std::move(proj));
+	if (it == end(list)) {
+		return false;
+	} else {
+		const auto item =
+			session().data().groups().findItemToEdit((*it)->data()).get();
+		editMessageRequestNotify(item->fullId());
+		return true;
+	}
 }
 
 rpl::producer<FullMsgId> ListWidget::replyToMessageRequested() const {
@@ -2739,6 +2757,49 @@ void ListWidget::replyToMessageRequestNotify(FullMsgId item) {
 
 rpl::producer<FullMsgId> ListWidget::readMessageRequested() const {
 	return _requestedToReadMessage.events();
+}
+
+rpl::producer<FullMsgId> ListWidget::showMessageRequested() const {
+	return _requestedToShowMessage.events();
+}
+
+void ListWidget::replyNextMessage(FullMsgId fullId, bool next) {
+	const auto reply = [&](Element *view) {
+		if (view) {
+			const auto newFullId = view->data()->fullId();
+			replyToMessageRequestNotify(newFullId);
+			_requestedToShowMessage.fire_copy(newFullId);
+		} else {
+			replyToMessageRequestNotify(FullMsgId());
+			clearHighlightedMessage();
+		}
+	};
+	const auto replyFirst = [&] {
+		reply(next ? nullptr : _items.back().get());
+	};
+	if (!fullId) {
+		replyFirst();
+		return;
+	}
+
+	auto proj = [&](not_null<Element*> view) {
+		return view->data()->fullId() == fullId;
+	};
+	const auto &list = ranges::views::reverse(_items);
+	const auto it = ranges::find_if(list, std::move(proj));
+	if (it == end(list)) {
+		replyFirst();
+		return;
+	} else {
+		const auto nextIt = it + (next ? -1 : 1);
+		if (nextIt == end(list)) {
+			return;
+		} else if (next && (it == begin(list))) {
+			reply(nullptr);
+		} else {
+			reply(nextIt->get());
+		}
+	}
 }
 
 ListWidget::~ListWidget() = default;

@@ -370,7 +370,7 @@ void NotificationsCount::setOverCorner(ScreenCorner corner) {
 		samples[i]->showFast();
 	}
 	if (samplesNeeded > samplesLeave) {
-		auto r = psDesktopRect();
+		auto r = _controller->widget()->desktopRect();
 		auto isLeft = Core::Settings::IsLeftCorner(_overCorner);
 		auto isTop = Core::Settings::IsTopCorner(_overCorner);
 		auto sampleLeft = (isLeft == rtl()) ? (r.x() + r.width() - st::notifyWidth - st::notifyDeltaX) : (r.x() + st::notifyDeltaX);
@@ -438,8 +438,7 @@ NotificationsCount::~NotificationsCount() {
 NotificationsCount::SampleWidget::SampleWidget(
 	NotificationsCount *owner,
 	const QPixmap &cache)
-: QWidget(Core::App().getModalParent())
-, _owner(owner)
+: _owner(owner)
 , _cache(cache) {
 	const QSize size(
 		cache.width() / cache.devicePixelRatio(),

@@ -114,7 +114,7 @@ public:
 	void clickHandlerActiveChanged(const ClickHandlerPtr &p, bool active) override;
 	void clickHandlerPressedChanged(const ClickHandlerPtr &p, bool pressed) override;
 
-private slots:
+private Q_SLOTS:
 	void onHideControls(bool force = false);
 
 	void onScreenResized(int screen);
@@ -170,6 +170,7 @@ private:
 	};
 
 	void paintEvent(QPaintEvent *e) override;
+	void moveEvent(QMoveEvent *e) override;
 	void resizeEvent(QResizeEvent *e) override;
 
 	void keyPressEvent(QKeyEvent *e) override;
@@ -208,6 +209,9 @@ private:
 	void playbackResumeOnCall();
 	void playbackPauseMusic();
 	void switchToPip();
+
+	void clearBeforeHide();
+	void clearAfterHide();
 
 	void assignMediaPointer(DocumentData *document);
 	void assignMediaPointer(not_null<PhotoData*> photo);
@@ -442,6 +446,7 @@ private:
 
 	std::unique_ptr<Streamed> _streamed;
 	std::unique_ptr<PipWrap> _pip;
+	bool _showAsPip = false;
 
 	const style::icon *_docIcon = nullptr;
 	style::color _docIconColor;

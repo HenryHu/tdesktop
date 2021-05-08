@@ -19,6 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_session.h"
 #include "lang/lang_keys.h"
 #include "ui/text/text_utilities.h"
+#include "ui/basic_click_handlers.h"
 #include "boxes/sticker_set_box.h"
 #include "base/unixtime.h"
 #include "core/application.h"
@@ -67,7 +68,8 @@ MTPMessage PrepareLogMessage(
 	}, [&](const MTPDmessageService &data) {
 		const auto removeFlags = MTPDmessageService::Flag::f_out
 			| MTPDmessageService::Flag::f_post
-			| MTPDmessageService::Flag::f_reply_to;
+			| MTPDmessageService::Flag::f_reply_to
+			| MTPDmessageService::Flag::f_ttl_period;
 		return MTP_messageService(
 			MTP_flags(data.vflags().v & ~removeFlags),
 			MTP_int(newId),
@@ -75,7 +77,8 @@ MTPMessage PrepareLogMessage(
 			data.vpeer_id(),
 			MTPMessageReplyHeader(),
 			MTP_int(newDate),
-			data.vaction());
+			data.vaction(),
+			MTPint()); // ttl_period
 	}, [&](const MTPDmessage &data) {
 		const auto removeFlags = MTPDmessage::Flag::f_out
 			| MTPDmessage::Flag::f_post
@@ -86,7 +89,8 @@ MTPMessage PrepareLogMessage(
 			| MTPDmessage::Flag::f_views
 			| MTPDmessage::Flag::f_forwards
 			//| MTPDmessage::Flag::f_reactions
-			| MTPDmessage::Flag::f_restriction_reason;
+			| MTPDmessage::Flag::f_restriction_reason
+			| MTPDmessage::Flag::f_ttl_period;
 		return MTP_message(
 			MTP_flags(data.vflags().v & ~removeFlags),
 			MTP_int(newId),
@@ -109,7 +113,8 @@ MTPMessage PrepareLogMessage(
 			MTP_string(),
 			MTP_long(0), // grouped_id
 			//MTPMessageReactions(),
-			MTPVector<MTPRestrictionReason>());
+			MTPVector<MTPRestrictionReason>(),
+			MTPint()); // ttl_period
 	});
 }
 
@@ -199,14 +204,11 @@ TextWithEntities GenerateAdminChangeText(
 QString GenerateBannedChangeText(
 		const MTPChatBannedRights *newRights,
 		const MTPChatBannedRights *prevRights) {
-	Expects(!newRights || newRights->type() == mtpc_chatBannedRights);
-	Expects(!prevRights || prevRights->type() == mtpc_chatBannedRights);
-
 	using Flag = MTPDchatBannedRights::Flag;
 	using Flags = MTPDchatBannedRights::Flags;
 
-	auto newFlags = newRights ? newRights->c_chatBannedRights().vflags().v : Flags(0);
-	auto prevFlags = prevRights ? prevRights->c_chatBannedRights().vflags().v : Flags(0);
+	auto newFlags = newRights ? Data::ChatBannedRightsFlags(*newRights) : Flags(0);
+	auto prevFlags = prevRights ? Data::ChatBannedRightsFlags(*prevRights) : Flags(0);
 	static auto phraseMap = std::map<Flags, tr::phrase<>>{
 		{ Flag::f_view_messages, tr::lng_admin_log_banned_view_messages },
 		{ Flag::f_send_messages, tr::lng_admin_log_banned_send_messages },
@@ -225,19 +227,21 @@ QString GenerateBannedChangeText(
 }
 
 TextWithEntities GenerateBannedChangeText(
+		PeerId participantId,
 		const TextWithEntities &user,
 		const MTPChatBannedRights *newRights,
 		const MTPChatBannedRights *prevRights) {
-	Expects(!newRights || newRights->type() == mtpc_chatBannedRights);
-
 	using Flag = MTPDchatBannedRights::Flag;
 	using Flags = MTPDchatBannedRights::Flags;
 
-	auto newFlags = newRights ? newRights->c_chatBannedRights().vflags().v : Flags(0);
-	auto newUntil = newRights ? newRights->c_chatBannedRights().vuntil_date().v : TimeId(0);
+	auto newFlags = newRights ? Data::ChatBannedRightsFlags(*newRights) : Flags(0);
+	auto newUntil = newRights ? Data::ChatBannedRightsUntilDate(*newRights) : TimeId(0);
+	auto prevFlags = prevRights ? Data::ChatBannedRightsFlags(*prevRights) : Flags(0);
 	auto indefinitely = ChannelData::IsRestrictedForever(newUntil);
 	if (newFlags & Flag::f_view_messages) {
 		return tr::lng_admin_log_banned(tr::now, lt_user, user, Ui::Text::WithEntities);
+	} else if (newFlags == 0 && (prevFlags & Flag::f_view_messages) && !peerIsUser(participantId)) {
+		return tr::lng_admin_log_unbanned(tr::now, lt_user, user, Ui::Text::WithEntities);
 	}
 	auto untilText = indefinitely
 		? tr::lng_admin_log_restricted_forever(tr::now)
@@ -259,21 +263,103 @@ TextWithEntities GenerateBannedChangeText(
 	return result;
 }
 
-auto GenerateUserString(
+QString ExtractInviteLink(const MTPExportedChatInvite &data) {
+	return data.match([&](const MTPDchatInviteExported &data) {
+		return qs(data.vlink());
+	});
+}
+
+QString InternalInviteLinkUrl(const MTPExportedChatInvite &data) {
+	const auto base64 = ExtractInviteLink(data).toUtf8().toBase64();
+	return "internal:show_invite_link/?link=" + QString::fromLatin1(base64);
+}
+
+QString GenerateInviteLinkText(const MTPExportedChatInvite &data) {
+	return ExtractInviteLink(data).replace(
+		qstr("https://"),
+		QString()
+	).replace(
+		qstr("t.me/+"),
+		QString()
+	).replace(
+		qstr("t.me/joinchat/"),
+		QString()
+	);
+}
+
+QString GenerateInviteLinkLink(const MTPExportedChatInvite &data) {
+	const auto text = GenerateInviteLinkText(data);
+	return text.endsWith("...")
+		? text
+		: textcmdLink(InternalInviteLinkUrl(data), text);
+}
+
+TextWithEntities GenerateInviteLinkChangeText(
+		const MTPExportedChatInvite &newLink,
+		const MTPExportedChatInvite &prevLink) {
+	auto link = TextWithEntities{ GenerateInviteLinkText(newLink) };
+	if (!link.text.endsWith("...")) {
+		link.entities.push_back({
+			EntityType::CustomUrl,
+			0,
+			link.text.size(),
+			InternalInviteLinkUrl(newLink) });
+	}
+	auto result = tr::lng_admin_log_edited_invite_link(tr::now, lt_link, link, Ui::Text::WithEntities);
+	result.text.append('\n');
+
+	const auto expireDate = [](const MTPExportedChatInvite &link) {
+		return link.match([](const MTPDchatInviteExported &data) {
+			return data.vexpire_date().value_or_empty();
+		});
+	};
+	const auto usageLimit = [](const MTPExportedChatInvite &link) {
+		return link.match([](const MTPDchatInviteExported &data) {
+			return data.vusage_limit().value_or_empty();
+		});
+	};
+	const auto wrapDate = [](TimeId date) {
+		return date
+			? langDateTime(base::unixtime::parse(date))
+			: tr::lng_group_invite_expire_never(tr::now);
+	};
+	const auto wrapUsage = [](int count) {
+		return count
+			? QString::number(count)
+			: tr::lng_group_invite_usage_any(tr::now);
+	};
+	const auto wasExpireDate = expireDate(prevLink);
+	const auto nowExpireDate = expireDate(newLink);
+	const auto wasUsageLimit = usageLimit(prevLink);
+	const auto nowUsageLimit = usageLimit(newLink);
+	if (wasExpireDate != nowExpireDate) {
+		result.text.append('\n').append(tr::lng_admin_log_invite_link_expire_date(tr::now, lt_previous, wrapDate(wasExpireDate), lt_limit, wrapDate(nowExpireDate)));
+	}
+	if (wasUsageLimit != nowUsageLimit) {
+		result.text.append('\n').append(tr::lng_admin_log_invite_link_usage_limit(tr::now, lt_previous, wrapUsage(wasUsageLimit), lt_limit, wrapUsage(nowUsageLimit)));
+	}
+
+	result.entities.push_front(EntityInText(EntityType::Italic, 0, result.text.size()));
+	return result;
+};
+
+auto GenerateParticipantString(
 		not_null<Main::Session*> session,
-		MTPint userId) {
+		PeerId participantId) {
 	// User name in "User name (@username)" format with entities.
-	auto user = session->data().user(userId.v);
-	auto name = TextWithEntities { user->name };
-	auto entityData = QString::number(user->id)
-		+ '.'
-		+ QString::number(user->accessHash());
-	name.entities.push_back({
-		EntityType::MentionName,
-		0,
-		name.text.size(),
-		entityData });
-	auto username = user->userName();
+	auto peer = session->data().peer(participantId);
+	auto name = TextWithEntities { peer->name };
+	if (const auto user = peer->asUser()) {
+		auto entityData = QString::number(user->id.value)
+			+ '.'
+			+ QString::number(user->accessHash());
+		name.entities.push_back({
+			EntityType::MentionName,
+			0,
+			name.text.size(),
+			entityData });
+	}
+	auto username = peer->userName();
 	if (username.isEmpty()) {
 		return name;
 	}
@@ -296,32 +382,10 @@ auto GenerateParticipantChangeTextInner(
 		const MTPChannelParticipant &participant,
 		const MTPChannelParticipant *oldParticipant) {
 	const auto oldType = oldParticipant ? oldParticipant->type() : 0;
-	return participant.match([&](const MTPDchannelParticipantCreator &data) {
-		// No valid string here :(
-		return tr::lng_admin_log_transferred(
-			tr::now,
-			lt_user,
-			GenerateUserString(&channel->session(), data.vuser_id()),
-			Ui::Text::WithEntities);
-	}, [&](const MTPDchannelParticipantAdmin &data) {
-		auto user = GenerateUserString(&channel->session(), data.vuser_id());
-		return GenerateAdminChangeText(
-			channel,
-			user,
-			&data.vadmin_rights(),
-			(oldType == mtpc_channelParticipantAdmin)
-				? &oldParticipant->c_channelParticipantAdmin().vadmin_rights()
-				: nullptr);
-	}, [&](const MTPDchannelParticipantBanned &data) {
-		auto user = GenerateUserString(&channel->session(), data.vuser_id());
-		return GenerateBannedChangeText(
-			user,
-			&data.vbanned_rights(),
-			(oldType == mtpc_channelParticipantBanned)
-				? &oldParticipant->c_channelParticipantBanned().vbanned_rights()
-				: nullptr);
-	}, [&](const auto &data) {
-		auto user = GenerateUserString(&channel->session(), data.vuser_id());
+	const auto generateOther = [&](PeerId participantId) {
+		auto user = GenerateParticipantString(
+			&channel->session(),
+			participantId);
 		if (oldType == mtpc_channelParticipantAdmin) {
 			return GenerateAdminChangeText(
 				channel,
@@ -330,11 +394,49 @@ auto GenerateParticipantChangeTextInner(
 				&oldParticipant->c_channelParticipantAdmin().vadmin_rights());
 		} else if (oldType == mtpc_channelParticipantBanned) {
 			return GenerateBannedChangeText(
+				participantId,
 				user,
 				nullptr,
 				&oldParticipant->c_channelParticipantBanned().vbanned_rights());
 		}
 		return tr::lng_admin_log_invited(tr::now, lt_user, user, Ui::Text::WithEntities);
+	};
+	return participant.match([&](const MTPDchannelParticipantCreator &data) {
+		// No valid string here :(
+		return tr::lng_admin_log_transferred(
+			tr::now,
+			lt_user,
+			GenerateParticipantString(
+				&channel->session(),
+				peerFromUser(data.vuser_id())),
+			Ui::Text::WithEntities);
+	}, [&](const MTPDchannelParticipantAdmin &data) {
+		const auto user = GenerateParticipantString(
+			&channel->session(),
+			peerFromUser(data.vuser_id()));
+		return GenerateAdminChangeText(
+			channel,
+			user,
+			&data.vadmin_rights(),
+			(oldType == mtpc_channelParticipantAdmin
+				? &oldParticipant->c_channelParticipantAdmin().vadmin_rights()
+				: nullptr));
+	}, [&](const MTPDchannelParticipantBanned &data) {
+		const auto participantId = peerFromMTP(data.vpeer());
+		const auto user = GenerateParticipantString(
+			&channel->session(),
+			participantId);
+		return GenerateBannedChangeText(
+			participantId,
+			user,
+			&data.vbanned_rights(),
+			(oldType == mtpc_channelParticipantBanned
+				? &oldParticipant->c_channelParticipantBanned().vbanned_rights()
+				: nullptr));
+	}, [&](const MTPDchannelParticipantLeft &data) {
+		return generateOther(peerFromMTP(data.vpeer()));
+	}, [&](const auto &data) {
+		return generateOther(peerFromUser(data.vuser_id()));
 	});
 }
 
@@ -378,7 +480,7 @@ OwnedItem &OwnedItem::operator=(OwnedItem &&other) {
 }
 
 OwnedItem::~OwnedItem() {
-	_view = nullptr;
+	clearView();
 	if (_data) {
 		_data->destroy();
 	}
@@ -387,6 +489,10 @@ OwnedItem::~OwnedItem() {
 void OwnedItem::refreshView(
 		not_null<HistoryView::ElementDelegate*> delegate) {
 	_view = _data->createView(delegate);
+}
+
+void OwnedItem::clearView() {
+	_view = nullptr;
 }
 
 void GenerateItems(
@@ -861,58 +967,163 @@ void GenerateItems(
 		addSimpleServiceMessage(text);
 	};
 
-	auto createParticipantMute = [&](const MTPDchannelAdminLogEventActionParticipantMute &data) {
-		data.vparticipant().match([&](const MTPDgroupCallParticipant &data) {
-			const auto user = history->owner().user(data.vuser_id().v);
-			const auto userLink = user->createOpenLink();
-			const auto userLinkText = textcmdLink(2, user->name);
-			auto text = tr::lng_admin_log_muted_participant(
-				tr::now,
-				lt_from,
-				fromLinkText,
-				lt_user,
-				userLinkText);
-			auto message = HistoryService::PreparedText{ text };
-			message.links.push_back(fromLink);
-			message.links.push_back(userLink);
-			addPart(history->makeServiceMessage(
-				history->nextNonHistoryEntryId(),
-				MTPDmessage_ClientFlag::f_admin_log_entry,
-				date,
-				message,
-				MTPDmessage::Flags(0),
-				peerToUser(from->id)));
+	auto groupCallParticipantPeer = [&](const MTPGroupCallParticipant &data) {
+		return data.match([&](const MTPDgroupCallParticipant &data) {
+			return history->owner().peer(peerFromMTP(data.vpeer()));
 		});
 	};
 
+	auto addServiceMessageWithLink = [&](const QString &text, const ClickHandlerPtr &link) {
+		auto message = HistoryService::PreparedText{ text };
+		message.links.push_back(fromLink);
+		message.links.push_back(link);
+		addPart(history->makeServiceMessage(
+			history->nextNonHistoryEntryId(),
+			MTPDmessage_ClientFlag::f_admin_log_entry,
+			date,
+			message,
+			MTPDmessage::Flags(0),
+			peerToUser(from->id)));
+	};
+
+	auto createParticipantMute = [&](const MTPDchannelAdminLogEventActionParticipantMute &data) {
+		const auto participantPeer = groupCallParticipantPeer(data.vparticipant());
+		const auto participantPeerLink = participantPeer->createOpenLink();
+		const auto participantPeerLinkText = textcmdLink(2, participantPeer->name);
+		auto text = tr::lng_admin_log_muted_participant(
+			tr::now,
+			lt_from,
+			fromLinkText,
+			lt_user,
+			participantPeerLinkText);
+		addServiceMessageWithLink(text, participantPeerLink);
+	};
+
 	auto createParticipantUnmute = [&](const MTPDchannelAdminLogEventActionParticipantUnmute &data) {
-		data.vparticipant().match([&](const MTPDgroupCallParticipant &data) {
-			const auto user = history->owner().user(data.vuser_id().v);
-			const auto userLink = user->createOpenLink();
-			const auto userLinkText = textcmdLink(2, user->name);
-			auto text = tr::lng_admin_log_unmuted_participant(
-				tr::now,
-				lt_from,
-				fromLinkText,
-				lt_user,
-				userLinkText);
-			auto message = HistoryService::PreparedText{ text };
-			message.links.push_back(fromLink);
-			message.links.push_back(userLink);
-			addPart(history->makeServiceMessage(
-				history->nextNonHistoryEntryId(),
-				MTPDmessage_ClientFlag::f_admin_log_entry,
-				date,
-				message,
-				MTPDmessage::Flags(0),
-				peerToUser(from->id)));
-		});
+		const auto participantPeer = groupCallParticipantPeer(data.vparticipant());
+		const auto participantPeerLink = participantPeer->createOpenLink();
+		const auto participantPeerLinkText = textcmdLink(2, participantPeer->name);
+		auto text = tr::lng_admin_log_unmuted_participant(
+			tr::now,
+			lt_from,
+			fromLinkText,
+			lt_user,
+			participantPeerLinkText);
+		addServiceMessageWithLink(text, participantPeerLink);
 	};
 
 	auto createToggleGroupCallSetting = [&](const MTPDchannelAdminLogEventActionToggleGroupCallSetting &data) {
 		const auto text = mtpIsTrue(data.vjoin_muted())
 			? tr::lng_admin_log_disallowed_unmute_self(tr::now, lt_from, fromLinkText)
 			: tr::lng_admin_log_allowed_unmute_self(tr::now, lt_from, fromLinkText);
+		addSimpleServiceMessage(text);
+	};
+
+	auto addInviteLinkServiceMessage = [&](const QString &text, const MTPExportedChatInvite &data) {
+		auto message = HistoryService::PreparedText{ text };
+		message.links.push_back(fromLink);
+		if (!ExtractInviteLink(data).endsWith("...")) {
+			message.links.push_back(std::make_shared<UrlClickHandler>(InternalInviteLinkUrl(data)));
+		}
+		addPart(history->makeServiceMessage(
+			history->nextNonHistoryEntryId(),
+			MTPDmessage_ClientFlag::f_admin_log_entry,
+			date,
+			message,
+			MTPDmessage::Flags(0),
+			peerToUser(from->id),
+			nullptr));
+	};
+
+	auto createParticipantJoinByInvite = [&](const MTPDchannelAdminLogEventActionParticipantJoinByInvite &data) {
+		auto text = (channel->isMegagroup()
+			? tr::lng_admin_log_participant_joined_by_link
+			: tr::lng_admin_log_participant_joined_by_link_channel);
+		addInviteLinkServiceMessage(
+			text(
+				tr::now,
+				lt_from,
+				fromLinkText,
+				lt_link,
+				GenerateInviteLinkLink(data.vinvite())),
+			data.vinvite());
+	};
+
+	auto createExportedInviteDelete = [&](const MTPDchannelAdminLogEventActionExportedInviteDelete &data) {
+		addInviteLinkServiceMessage(
+			tr::lng_admin_log_delete_invite_link(
+				tr::now,
+				lt_from,
+				fromLinkText,
+				lt_link,
+				GenerateInviteLinkLink(data.vinvite())),
+			data.vinvite());
+	};
+
+	auto createExportedInviteRevoke = [&](const MTPDchannelAdminLogEventActionExportedInviteRevoke &data) {
+		addInviteLinkServiceMessage(
+			tr::lng_admin_log_revoke_invite_link(
+				tr::now,
+				lt_from,
+				fromLinkText,
+				lt_link,
+				GenerateInviteLinkLink(data.vinvite())),
+			data.vinvite());
+	};
+
+	auto createExportedInviteEdit = [&](const MTPDchannelAdminLogEventActionExportedInviteEdit &data) {
+		auto bodyFlags = Flag::f_entities | Flag::f_from_id;
+		auto bodyClientFlags = MTPDmessage_ClientFlag::f_admin_log_entry;
+		auto bodyReplyTo = 0;
+		auto bodyViaBotId = 0;
+		auto bodyText = GenerateInviteLinkChangeText(data.vnew_invite(), data.vprev_invite());
+		addPart(history->makeMessage(
+			history->nextNonHistoryEntryId(),
+			bodyFlags,
+			bodyClientFlags,
+			bodyReplyTo,
+			bodyViaBotId,
+			date,
+			peerToUser(from->id),
+			QString(),
+			bodyText));
+	};
+
+	auto createParticipantVolume = [&](const MTPDchannelAdminLogEventActionParticipantVolume &data) {
+		const auto participantPeer = groupCallParticipantPeer(data.vparticipant());
+		const auto participantPeerLink = participantPeer->createOpenLink();
+		const auto participantPeerLinkText = textcmdLink(2, participantPeer->name);
+		const auto volume = data.vparticipant().match([&](
+				const MTPDgroupCallParticipant &data) {
+			return data.vvolume().value_or(10000);
+		});
+		const auto volumeText = QString::number(volume / 100) + '%';
+		auto text = tr::lng_admin_log_participant_volume(
+			tr::now,
+			lt_from,
+			fromLinkText,
+			lt_user,
+			participantPeerLinkText,
+			lt_percent,
+			volumeText);
+		addServiceMessageWithLink(text, participantPeerLink);
+	};
+
+	auto createChangeHistoryTTL = [&](const MTPDchannelAdminLogEventActionChangeHistoryTTL &data) {
+		const auto was = data.vprev_value().v;
+		const auto now = data.vnew_value().v;
+		const auto wrap = [](int duration) {
+			return (duration == 5)
+				? u"5 seconds"_q
+				: (duration < 3 * 86400)
+				? tr::lng_manage_messages_ttl_after1(tr::now)
+				: tr::lng_manage_messages_ttl_after2(tr::now);
+		};
+		auto text = !was
+			? tr::lng_admin_log_messages_ttl_set(tr::now, lt_from, fromLinkText, lt_duration, wrap(now))
+			: !now
+			? tr::lng_admin_log_messages_ttl_removed(tr::now, lt_from, fromLinkText, lt_duration, wrap(was))
+			: tr::lng_admin_log_messages_ttl_changed(tr::now, lt_from, fromLinkText, lt_previous, wrap(was), lt_duration, wrap(now));
 		addSimpleServiceMessage(text);
 	};
 
@@ -968,6 +1179,18 @@ void GenerateItems(
 		createParticipantUnmute(data);
 	}, [&](const MTPDchannelAdminLogEventActionToggleGroupCallSetting &data) {
 		createToggleGroupCallSetting(data);
+	}, [&](const MTPDchannelAdminLogEventActionParticipantJoinByInvite &data) {
+		createParticipantJoinByInvite(data);
+	}, [&](const MTPDchannelAdminLogEventActionExportedInviteDelete &data) {
+		createExportedInviteDelete(data);
+	}, [&](const MTPDchannelAdminLogEventActionExportedInviteRevoke &data) {
+		createExportedInviteRevoke(data);
+	}, [&](const MTPDchannelAdminLogEventActionExportedInviteEdit &data) {
+		createExportedInviteEdit(data);
+	}, [&](const MTPDchannelAdminLogEventActionParticipantVolume &data) {
+		createParticipantVolume(data);
+	}, [&](const MTPDchannelAdminLogEventActionChangeHistoryTTL &data) {
+		createChangeHistoryTTL(data);
 	});
 }
 

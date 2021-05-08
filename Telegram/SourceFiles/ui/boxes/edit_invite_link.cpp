@@ -120,10 +120,10 @@ void EditInviteLinkBox(
 		int expireValue = 0;
 		int usageValue = 0;
 	};
-	const auto state = container->lifetime().make_state<State>(State{
+	const auto state = box->lifetime().make_state<State>(State{
 		.expireValue = expire,
 		.usageValue = usage
-		});
+	});
 	const auto regenerate = [=] {
 		expireGroup->setValue(state->expireValue);
 		usageGroup->setValue(state->usageValue);
@@ -201,12 +201,12 @@ void EditInviteLinkBox(
 				: (state->expireValue < 0)
 				? (now - state->expireValue)
 				: (now + kDay);
-			ChooseDateTimeBox(
-				box,
-				tr::lng_group_invite_expire_after(),
-				tr::lng_settings_save(),
-				save,
-				time);
+			ChooseDateTimeBox(box, {
+				.title = tr::lng_group_invite_expire_after(),
+				.submit = tr::lng_settings_save(),
+				.done = save,
+				.time = time,
+			});
 		}));
 	});
 	usageGroup->setChangedCallback([=](int value) {

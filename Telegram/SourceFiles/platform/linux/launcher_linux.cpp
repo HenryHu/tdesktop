@@ -7,7 +7,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "platform/linux/launcher_linux.h"
 
-#include "platform/linux/specific_linux.h"
 #include "core/crash_reports.h"
 #include "core/update_checker.h"
 
@@ -49,11 +48,26 @@ Launcher::Launcher(int argc, char *argv[])
 }
 
 void Launcher::initHook() {
-#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
 	QApplication::setAttribute(Qt::AA_DisableSessionManager, true);
-#endif // Qt >= 5.14
+	QApplication::setDesktopFileName([] {
+		if (!Core::UpdaterDisabled() && !cExeName().isEmpty()) {
+			const auto appimagePath = qsl("file://%1%2").arg(
+				cExeDir(),
+				cExeName()).toUtf8();
 
-	QApplication::setDesktopFileName(GetLauncherFilename());
+			char md5Hash[33] = { 0 };
+			hashMd5Hex(
+				appimagePath.constData(),
+				appimagePath.size(),
+				md5Hash);
+
+			return qsl("appimagekit_%1-%2.desktop").arg(
+				md5Hash,
+				AppName.utf16().replace(' ', '_'));
+		}
+
+		return qsl(QT_STRINGIFY(TDESKTOP_LAUNCHER_BASENAME) ".desktop");
+	}());
 }
 
 bool Launcher::launchUpdater(UpdaterLaunch action) {

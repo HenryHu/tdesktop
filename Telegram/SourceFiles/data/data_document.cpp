@@ -47,6 +47,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lottie/lottie_animation.h"
 #include "app.h"
 
+#include <QtCore/QBuffer>
+#include <QtCore/QMimeType>
+#include <QtCore/QMimeDatabase>
+
 namespace {
 
 const auto kAnimatedStickerDimensions = QSize(
@@ -209,7 +213,7 @@ QString FileNameUnsafe(
 	}
 	QString nameBase = path + nameStart;
 	name = nameBase + extension;
-	for (int i = 0; QFileInfo(name).exists(); ++i) {
+	for (int i = 0; QFileInfo::exists(name); ++i) {
 		name = nameBase + QString(" (%1)").arg(i + 2) + extension;
 	}
 
@@ -320,21 +324,33 @@ void DocumentOpenClickHandler::Open(
 		return;
 	}
 
-	const auto openFile = [&] {
+	const auto media = data->createMediaView();
+	const auto openImageInApp = [&] {
+		if (data->size >= App::kImageSizeLimit) {
+			return false;
+		}
 		const auto &location = data->location(true);
-		if (data->size < App::kImageSizeLimit && location.accessEnable()) {
+		if (!location.isEmpty() && location.accessEnable()) {
 			const auto guard = gsl::finally([&] {
 				location.accessDisable();
 			});
 			const auto path = location.name();
-			if (Core::MimeTypeForFile(path).name().startsWith("image/") && QImageReader(path).canRead()) {
+			if (Core::MimeTypeForFile(path).name().startsWith("image/")
+				&& QImageReader(path).canRead()) {
 				Core::App().showDocument(data, context);
-				return;
+				return true;
+			}
+		} else if (data->mimeString().startsWith("image/")
+			&& !media->bytes().isEmpty()) {
+			auto bytes = media->bytes();
+			auto buffer = QBuffer(&bytes);
+			if (QImageReader(&buffer).canRead()) {
+				Core::App().showDocument(data, context);
+				return true;
 			}
 		}
-		LaunchWithWarning(&data->session(), location.name(), context);
+		return false;
 	};
-	const auto media = data->createMediaView();
 	const auto &location = data->location(true);
 	if (data->isTheme() && media->loaded(true)) {
 		Core::App().showDocument(data, context);
@@ -352,11 +368,16 @@ void DocumentOpenClickHandler::Open(
 		} else {
 			Core::App().showDocument(data, context);
 		}
-	} else if (data->saveFromDataSilent()) {
-		openFile();
-	} else if (data->status == FileReady
-		|| data->status == FileDownloadFailed) {
-		DocumentSaveClickHandler::Save(origin, data);
+	} else {
+		data->saveFromDataSilent();
+		if (!openImageInApp()) {
+			if (!data->filepath(true).isEmpty()) {
+				LaunchWithWarning(&data->session(), location.name(), context);
+			} else if (data->status == FileReady
+				|| data->status == FileDownloadFailed) {
+				DocumentSaveClickHandler::Save(origin, data);
+			}
+		}
 	}
 }
 
@@ -1628,7 +1649,7 @@ void DocumentData::collectLocalData(not_null<DocumentData*> local) {
 namespace Data {
 
 QString FileExtension(const QString &filepath) {
-	const auto reversed = ranges::view::reverse(filepath);
+	const auto reversed = ranges::views::reverse(filepath);
 	const auto last = ranges::find_first_of(reversed, ".\\/");
 	if (last == reversed.end() || *last != '.') {
 		return QString();
@@ -1695,10 +1716,19 @@ bool IsIpRevealingName(const QString &filepath) {
 		const auto list = joined.split(' ');
 		return base::flat_set<QString>(list.begin(), list.end());
 	}();
+	static const auto kMimeTypes = [] {
+		const auto joined = u"text/html image/svg+xml"_q;
+		const auto list = joined.split(' ');
+		return base::flat_set<QString>(list.begin(), list.end());
+	}();
 
 	return ranges::binary_search(
 		kExtensions,
-		FileExtension(filepath).toLower());
+		FileExtension(filepath).toLower()
+	) || ranges::binary_search(
+		kMimeTypes,
+		QMimeDatabase().mimeTypeForFile(QFileInfo(filepath)).name()
+	);
 }
 
 base::binary_guard ReadImageAsync(

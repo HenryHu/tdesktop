@@ -145,25 +145,6 @@ void psDoCleanup() {
 	}
 }
 
-QRect psDesktopRect() {
-	static QRect _monitorRect;
-	static crl::time _monitorLastGot = 0;
-	auto tnow = crl::now();
-	if (tnow > _monitorLastGot + 1000LL || tnow < _monitorLastGot) {
-		_monitorLastGot = tnow;
-		HMONITOR hMonitor = MonitorFromWindow(App::wnd()->psHwnd(), MONITOR_DEFAULTTONEAREST);
-		if (hMonitor) {
-			MONITORINFOEX info;
-			info.cbSize = sizeof(info);
-			GetMonitorInfo(hMonitor, &info);
-			_monitorRect = QRect(info.rcWork.left, info.rcWork.top, info.rcWork.right - info.rcWork.left, info.rcWork.bottom - info.rcWork.top);
-		} else {
-			_monitorRect = QApplication::desktop()->availableGeometry(App::wnd());
-		}
-	}
-	return _monitorRect;
-}
-
 int psCleanup() {
 	__try
 	{
@@ -310,28 +291,6 @@ std::optional<bool> IsDarkMode() {
 
 bool AutostartSupported() {
 	return !IsWindowsStoreBuild();
-}
-
-bool ShowWindowMenu(QWindow *window) {
-	const auto pos = QCursor::pos();
-
-	SendMessage(
-		HWND(window->winId()),
-		WM_SYSCOMMAND,
-		SC_MOUSEMENU,
-		MAKELPARAM(pos.x(), pos.y()));
-
-	return true;
-}
-
-Window::ControlsLayout WindowControlsLayout() {
-	return Window::ControlsLayout{
-		.right = {
-			Window::Control::Minimize,
-			Window::Control::Maximize,
-			Window::Control::Close,
-		}
-	};
 }
 
 } // namespace Platform

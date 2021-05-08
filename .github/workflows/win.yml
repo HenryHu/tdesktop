@@ -114,6 +114,11 @@ jobs:
       - name: Choco installs.
         run: choco install --no-progress -y nasm yasm jom ninja
 
+      - name: NuGet sources.
+        run: |
+          nuget sources Disable -Name "Microsoft Visual Studio Offline Packages"
+          nuget sources Add -Source https://api.nuget.org/v3/index.json & exit 0
+
       - name: Patches.
         shell: bash
         run: |
@@ -128,7 +133,7 @@ jobs:
         shell: bash
         run: |
           echo "Find any version of Python 2."
-          p=`ls /c/hostedtoolcache/windows/python | grep 2 | tail -1`
+          p=`ls /c/hostedtoolcache/windows/python | grep "^2" | tail -1`
           if [ -z "$p" ]; then
             echo "Python 2 is not found."
             exit 1
@@ -279,6 +284,10 @@ jobs:
           msbuild -m opus.sln /property:Configuration=Debug /property:Platform="Win32"
           msbuild -m opus.sln /property:Configuration=Release /property:Platform="Win32"
 
+          echo "Workaround for FFmpeg."
+          copy Win32\Release\m.lib Win32\Release\ssp.lib
+          copy Win32\Release\m.lib Win32\Debug\ssp.lib
+
       - name: FFmpeg cache.
         id: cache-ffmpeg
         uses: actions/cache@v2
@@ -409,6 +418,7 @@ jobs:
           -D TDESKTOP_API_TEST=ON ^
           -D DESKTOP_APP_USE_PACKAGED=OFF ^
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF ^
+          -D DESKTOP_APP_NO_PDB=ON ^
           %TDESKTOP_BUILD_DEFINE% ^
           -DCMAKE_SYSTEM_VERSION=%SDK%
 

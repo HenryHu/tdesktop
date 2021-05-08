@@ -54,7 +54,7 @@ void ShareBotGame(not_null<UserData*> bot, not_null<PeerData*> chat) {
 		)).done([=](const MTPUpdates &result) {
 			api->applyUpdates(result, randomId);
 			finish();
-		}).fail([=](const RPCError &error) {
+		}).fail([=](const MTP::Error &error) {
 			api->sendMessageFail(error, chat);
 			finish();
 		}).afterRequest(
@@ -113,7 +113,7 @@ object_ptr<Ui::BoxContent> PrepareContactsBox(
 		box->addButton(tr::lng_close(), [=] { box->closeBox(); });
 		box->addLeftButton(
 			tr::lng_profile_add_contact(),
-			[=] { controller->widget()->showAddContact(); });
+			[=] { controller->showAddContact(); });
 	};
 	return Box<PeerListBox>(
 		std::make_unique<ContactsBoxController>(
@@ -195,7 +195,7 @@ void PeerListGlobalSearchController::searchOnServer() {
 		MTP_int(SearchPeopleLimit)
 	)).done([=](const MTPcontacts_Found &result, mtpRequestId requestId) {
 		searchDone(result, requestId);
-	}).fail([=](const RPCError &error, mtpRequestId requestId) {
+	}).fail([=](const MTP::Error &error, mtpRequestId requestId) {
 		if (_requestId == requestId) {
 			_requestId = 0;
 			delegate()->peerListSearchRefreshRows();
@@ -344,7 +344,7 @@ std::unique_ptr<PeerListRow> ChatsListBoxController::createSearchRow(not_null<Pe
 }
 
 bool ChatsListBoxController::appendRow(not_null<History*> history) {
-	if (auto row = delegate()->peerListFindRow(history->peer->id)) {
+	if (auto row = delegate()->peerListFindRow(history->peer->id.value)) {
 		updateRowHook(static_cast<Row*>(row));
 		return false;
 	}
@@ -426,7 +426,7 @@ void ContactsBoxController::rowClicked(not_null<PeerListRow*> row) {
 }
 
 bool ContactsBoxController::appendRow(not_null<UserData*> user) {
-	if (auto row = delegate()->peerListFindRow(user->id)) {
+	if (auto row = delegate()->peerListFindRow(user->id.value)) {
 		updateRowHook(row);
 		return false;
 	}

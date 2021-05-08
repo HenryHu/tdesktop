@@ -284,9 +284,9 @@ void ImportFromFile(
 			name,
 			ColorHexString(color->c));
 		if (data == "error") {
-			LOG(("Theme Error: could not adjust '%1: %2' in content"
-				).arg(QString::fromLatin1(name)
-				).arg(QString::fromLatin1(ColorHexString(color->c))));
+			LOG(("Theme Error: could not adjust '%1: %2' in content").arg(
+				QString::fromLatin1(name),
+				QString::fromLatin1(ColorHexString(color->c))));
 			return QByteArray();
 		}
 	}
@@ -433,7 +433,6 @@ SendMediaReady PrepareThemeMedia(
 			QByteArray bytes = QByteArray()) {
 		sizes.push_back(MTP_photoSize(
 			MTP_string(type),
-			MTP_fileLocationToBeDeprecated(MTP_long(0), MTP_int(0)),
 			MTP_int(image.width()),
 			MTP_int(image.height()), MTP_int(0)));
 		thumbnails.emplace(type[0], PreparedPhotoThumb{
@@ -545,7 +544,7 @@ Fn<void()> SavePreparedTheme(
 			MTPInputThemeSettings()
 		)).done([=](const MTPTheme &result) {
 			finish(result);
-		}).fail([=](const RPCError &error) {
+		}).fail([=](const MTP::Error &error) {
 			fail(SaveErrorType::Other, error.type());
 		}).send();
 	};
@@ -568,7 +567,7 @@ Fn<void()> SavePreparedTheme(
 			MTPInputThemeSettings()
 		)).done([=](const MTPTheme &result) {
 			finish(result);
-		}).fail([=](const RPCError &error) {
+		}).fail([=](const MTP::Error &error) {
 			fail(SaveErrorType::Other, error.type());
 		}).send();
 	};
@@ -586,7 +585,7 @@ Fn<void()> SavePreparedTheme(
 			} else {
 				updateTheme(result);
 			}
-		}).fail([=](const RPCError &error) {
+		}).fail([=](const MTP::Error &error) {
 			fail(SaveErrorType::Other, error.type());
 		}).send();
 	};
@@ -635,7 +634,7 @@ Fn<void()> SavePreparedTheme(
 			MTPInputThemeSettings()
 		)).done([=](const MTPTheme &result) {
 			save();
-		}).fail([=](const RPCError &error) {
+		}).fail([=](const MTP::Error &error) {
 			if (error.type() == qstr("THEME_FILE_INVALID")) {
 				save();
 			} else {
@@ -771,7 +770,7 @@ void SaveTheme(
 			result.match([&](const MTPDtheme &data) {
 				save(CloudTheme::Parse(&window->account().session(), data));
 			});
-		}).fail([=](const RPCError &error) {
+		}).fail([=](const MTP::Error &error) {
 			save(CloudTheme());
 		}).send();
 	} else {

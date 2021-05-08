@@ -611,7 +611,7 @@ void Editor::Inner::applyEditing(const QString &name, const QString &copyOf, QCo
 	auto plainValue = copyOf.isEmpty() ? ColorHexString(value) : copyOf.toLatin1();
 	auto newContent = ReplaceValueInPaletteContent(_paletteContent, plainName, plainValue);
 	if (newContent == "error") {
-		LOG(("Theme Error: could not replace '%1: %2' in content").arg(name).arg(copyOf.isEmpty() ? QString::fromLatin1(ColorHexString(value)) : copyOf));
+		LOG(("Theme Error: could not replace '%1: %2' in content").arg(name, copyOf.isEmpty() ? QString::fromLatin1(ColorHexString(value)) : copyOf));
 		error();
 		return;
 	}
@@ -858,8 +858,8 @@ void Editor::keyPressEvent(QKeyEvent *e) {
 	if (e->key() == Qt::Key_Escape) {
 		if (!_select->getQuery().isEmpty()) {
 			_select->clearQuery();
-		} else if (auto window = App::wnd()) {
-			window->setInnerFocus();
+		} else {
+			_window->widget()->setInnerFocus();
 		}
 	} else if (e->key() == Qt::Key_Down) {
 		_inner->selectSkip(1);
@@ -904,10 +904,8 @@ void Editor::closeWithConfirmation() {
 }
 
 void Editor::closeEditor() {
-	if (const auto window = App::wnd()) {
-		window->showRightColumn(nullptr);
-		Background()->clearEditingTheme();
-	}
+	_window->widget()->showRightColumn(nullptr);
+	Background()->clearEditingTheme();
 }
 
 } // namespace Theme

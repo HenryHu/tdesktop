@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "window/window_peer_menu.h"
 #include "ui/widgets/popup_menu.h"
+#include "ui/controls/delete_message_context_action.h"
 #include "ui/ui_utility.h"
 #include "ui/inactive_press.h"
 #include "lang/lang_keys.h"
@@ -689,11 +690,9 @@ void ListWidget::itemRemoved(not_null<const HistoryItem*> item) {
 FullMsgId ListWidget::computeFullId(
 		UniversalMsgId universalId) const {
 	Expects(universalId != 0);
-	auto peerChannel = [&] {
-		return _peer->isChannel() ? _peer->bareId() : NoChannel;
-	};
+
 	return (universalId > 0)
-		? FullMsgId(peerChannel(), universalId)
+		? FullMsgId(peerToChannel(_peer->id), universalId)
 		: FullMsgId(NoChannel, ServerMaxMsgId + universalId);
 }
 
@@ -723,9 +722,9 @@ auto ListWidget::collectSelectedItems() const -> SelectedItems {
 
 MessageIdsList ListWidget::collectSelectedIds() const {
 	const auto selected = collectSelectedItems();
-	return ranges::view::all(
+	return ranges::views::all(
 		selected.list
-	) | ranges::view::transform([](const SelectedItem &item) {
+	) | ranges::views::transform([](const SelectedItem &item) {
 		return item.msgId;
 	}) | ranges::to_vector;
 }
@@ -798,8 +797,8 @@ bool ListWidget::isMyItem(not_null<const HistoryItem*> item) const {
 }
 
 bool ListWidget::isPossiblyMyId(FullMsgId fullId) const {
-	return (fullId.channel != 0)
-		? (_peer->isChannel() && _peer->bareId() == fullId.channel)
+	return fullId.channel
+		? (_peer->isChannel() && peerToChannel(_peer->id) == fullId.channel)
 		: (!_peer->isChannel() || _migrated);
 }
 
@@ -1414,11 +1413,11 @@ void ListWidget::showContextMenu(
 					}));
 			}
 			if (item->canDelete()) {
-				_contextMenu->addAction(
-					tr::lng_context_delete_msg(tr::now),
-					crl::guard(this, [this, universalId] {
-						deleteItem(universalId);
-					}));
+				_contextMenu->addAction(Ui::DeleteMessageContextAction(
+					_contextMenu->menu(),
+					[=] { deleteItem(universalId); },
+					item->ttlDestroyAt(),
+					[=] { _contextMenu = nullptr; }));
 			}
 		}
 		_contextMenu->addAction(
@@ -2003,7 +2002,7 @@ void ListWidget::performDrag() {
 	}
 
 	TextWithEntities sel;
-	QList<QUrl> urls;
+	//QList<QUrl> urls;
 	if (uponSelected) {
 //		sel = getSelectedText();
 	} else if (pressedHandler) {

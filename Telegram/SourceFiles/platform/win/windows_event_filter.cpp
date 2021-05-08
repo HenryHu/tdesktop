@@ -93,10 +93,6 @@ EventFilter *EventFilter::CreateInstance(not_null<MainWindow*> window) {
 	return (instance = new EventFilter(window));
 }
 
-EventFilter *EventFilter::GetInstance() {
-	return instance;
-}
-
 void EventFilter::Destroy() {
 	Expects(instance != nullptr);
 
@@ -240,9 +236,9 @@ bool EventFilter::mainWindowEvent(
 
 	case WM_WTSSESSION_CHANGE: {
 		if (wParam == WTS_SESSION_LOGOFF || wParam == WTS_SESSION_LOCK) {
-			setSessionLoggedOff(true);
+			Global::SetScreenIsLocked(true);
 		} else if (wParam == WTS_SESSION_LOGON || wParam == WTS_SESSION_UNLOCK) {
-			setSessionLoggedOff(false);
+			Global::SetScreenIsLocked(false);
 		}
 	} return false;
 
@@ -287,7 +283,7 @@ bool EventFilter::mainWindowEvent(
 				} else if (wParam == SIZE_MINIMIZED) {
 					state = Qt::WindowMinimized;
 				}
-				emit _window->windowHandle()->windowStateChanged(state);
+				_window->windowHandle()->windowStateChanged(state);
 			} else {
 				_window->positionUpdated();
 			}

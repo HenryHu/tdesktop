@@ -14,9 +14,8 @@ namespace DesktopEnvironment {
 namespace {
 
 QString GetEnv(const char *name) {
-	auto result = getenv(name);
-	auto value = result ? QString::fromLatin1(result) : QString();
-	LOG(("Getting DE, %1: '%2'").arg(name).arg(value));
+	auto value = qEnvironmentVariable(name);
+	LOG(("Getting DE, %1: '%2'").arg(name, value));
 	return value;
 }
 

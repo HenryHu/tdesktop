@@ -45,6 +45,7 @@ class FormController;
 
 namespace Ui {
 class LayerWidget;
+enum class ReportReason;
 } // namespace Ui
 
 namespace Window {
@@ -150,6 +151,7 @@ public:
 		MsgId messageId = ShowAtUnreadMsgId;
 		RepliesByLinkInfo repliesInfo;
 		QString startToken;
+		std::optional<QString> voicechatHash;
 		FullMsgId clickFromMessageId;
 	};
 	void showPeerByLink(const PeerByLinkInfo &info);
@@ -296,9 +298,15 @@ public:
 	void resizeForThirdSection();
 	void closeThirdSection();
 
+	enum class GroupCallJoinConfirm {
+		None,
+		IfNowInAnother,
+		Always,
+	};
 	void startOrJoinGroupCall(
 		not_null<PeerData*> peer,
-		bool confirmedLeaveOther = false);
+		QString joinHash = QString(),
+		GroupCallJoinConfirm confirm = GroupCallJoinConfirm::IfNowInAnother);
 
 	void showSection(
 		std::shared_ptr<SectionMemento> memento,
@@ -325,8 +333,18 @@ public:
 		Dialogs::Key chat,
 		QDate requestedDate);
 
+	void showAddContact();
+	void showNewGroup();
+	void showNewChannel();
+
 	void showPassportForm(const Passport::FormRequest &request);
 	void clearPassportForm();
+
+	void showChooseReportMessages(
+		not_null<PeerData*> peer,
+		Ui::ReportReason reason,
+		Fn<void(MessageIdsList)> done);
+	void clearChooseReportMessages();
 
 	base::Variable<bool> &dialogsListFocused() {
 		return _dialogsListFocused;

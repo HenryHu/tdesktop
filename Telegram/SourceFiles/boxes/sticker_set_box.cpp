@@ -272,7 +272,7 @@ StickerSetBox::Inner::Inner(
 		_input
 	)).done([=](const MTPmessages_StickerSet &result) {
 		gotSet(result);
-	}).fail([=](const RPCError &error) {
+	}).fail([=](const MTP::Error &error) {
 		_loaded = true;
 		Ui::show(Box<InformBox>(tr::lng_stickers_not_found(tr::now)));
 	}).send();
@@ -473,11 +473,9 @@ void StickerSetBox::Inner::mouseMoveEvent(QMouseEvent *e) {
 		int index = stickerFromGlobalPos(e->globalPos());
 		if (index >= 0 && index < _pack.size() && index != _previewShown) {
 			_previewShown = index;
-			if (const auto w = App::wnd()) {
-				w->showMediaPreview(
-					Data::FileOriginStickerSet(_setId, _setAccess),
-					_pack[_previewShown]);
-			}
+			_controller->widget()->showMediaPreview(
+				Data::FileOriginStickerSet(_setId, _setAccess),
+				_pack[_previewShown]);
 		}
 	}
 }
@@ -536,11 +534,9 @@ void StickerSetBox::Inner::showPreview() {
 	int index = stickerFromGlobalPos(QCursor::pos());
 	if (index >= 0 && index < _pack.size()) {
 		_previewShown = index;
-		if (const auto w = App::wnd()) {
-			w->showMediaPreview(
-				Data::FileOriginStickerSet(_setId, _setAccess),
-				_pack[_previewShown]);
-		}
+		_controller->widget()->showMediaPreview(
+			Data::FileOriginStickerSet(_setId, _setAccess),
+			_pack[_previewShown]);
 	}
 }
 
@@ -570,7 +566,6 @@ int32 StickerSetBox::Inner::stickerFromGlobalPos(const QPoint &p) const {
 }
 
 void StickerSetBox::Inner::paintEvent(QPaintEvent *e) {
-	QRect r(e->rect());
 	Painter p(this);
 
 	if (_elements.empty()) {
@@ -762,7 +757,7 @@ void StickerSetBox::Inner::install() {
 		MTP_bool(false)
 	)).done([=](const MTPmessages_StickerSetInstallResult &result) {
 		installDone(result);
-	}).fail([=](const RPCError &error) {
+	}).fail([=](const MTP::Error &error) {
 		Ui::show(Box<InformBox>(tr::lng_stickers_not_found(tr::now)));
 	}).send();
 }

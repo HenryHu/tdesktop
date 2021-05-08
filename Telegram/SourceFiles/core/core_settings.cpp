@@ -17,6 +17,54 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "facades.h"
 
 namespace Core {
+namespace {
+
+constexpr auto kRecentEmojiLimit = 42;
+
+[[nodiscard]] WindowPosition Deserialize(const QByteArray &data) {
+	QDataStream stream(data);
+	stream.setVersion(QDataStream::Qt_5_1);
+
+	auto result = WindowPosition();
+	stream
+		>> result.x
+		>> result.y
+		>> result.w
+		>> result.h
+		>> result.moncrc
+		>> result.maximized
+		>> result.scale;
+	return result;
+}
+
+[[nodiscard]] QByteArray Serialize(const WindowPosition &position) {
+	auto result = QByteArray();
+	const auto size = 7 * sizeof(qint32);
+	result.reserve(size);
+	{
+		QDataStream stream(&result, QIODevice::WriteOnly);
+		stream.setVersion(QDataStream::Qt_5_1);
+		stream
+			<< qint32(position.x)
+			<< qint32(position.y)
+			<< qint32(position.w)
+			<< qint32(position.h)
+			<< qint32(position.moncrc)
+			<< qint32(position.maximized)
+			<< qint32(position.scale);
+	}
+	DEBUG_LOG(("Window Pos: Writing to storage %1, %2, %3, %4"
+		" (scale %5%, maximized %6)")
+		.arg(position.x)
+		.arg(position.y)
+		.arg(position.w)
+		.arg(position.h)
+		.arg(position.scale)
+		.arg(Logs::b(position.maximized)));
+	return result;
+}
+
+} // namespace
 
 Settings::Settings()
 : _sendSubmitWay(Ui::InputSubmitSettings::Enter)
@@ -27,6 +75,19 @@ Settings::Settings()
 
 QByteArray Settings::serialize() const {
 	const auto themesAccentColors = _themesAccentColors.serialize();
+	const auto windowPosition = Serialize(_windowPosition);
+
+	auto recentEmojiPreloadGenerated = std::vector<RecentEmojiId>();
+	if (_recentEmojiPreload.empty()) {
+		recentEmojiPreloadGenerated.reserve(_recentEmoji.size());
+		for (const auto [emoji, rating] : _recentEmoji) {
+			recentEmojiPreloadGenerated.push_back({ emoji->id(), rating });
+		}
+	}
+	const auto &recentEmojiPreloadData = _recentEmojiPreload.empty()
+		? recentEmojiPreloadGenerated
+		: _recentEmojiPreload;
+
 	auto size = Serialize::bytearraySize(themesAccentColors)
 		+ sizeof(qint32) * 5
 		+ Serialize::stringSize(_downloadPath.current())
@@ -35,11 +96,18 @@ QByteArray Settings::serialize() const {
 		+ Serialize::stringSize(_callOutputDeviceId)
 		+ Serialize::stringSize(_callInputDeviceId)
 		+ Serialize::stringSize(_callVideoInputDeviceId)
-		+ sizeof(qint32) * 3;
+		+ sizeof(qint32) * 5;
 	for (const auto &[key, value] : _soundOverrides) {
 		size += Serialize::stringSize(key) + Serialize::stringSize(value);
 	}
+	for (const auto &[id, rating] : recentEmojiPreloadData) {
+		size += Serialize::stringSize(id) + sizeof(quint16);
+	}
+	for (const auto &[id, variant] : _emojiVariants) {
+		size += Serialize::stringSize(id) + sizeof(quint8);
+	}
 	size += Serialize::bytearraySize(_videoPipGeometry);
+	size += Serialize::bytearraySize(windowPosition);
 
 	auto result = QByteArray();
 	result.reserve(size);
@@ -115,7 +183,17 @@ QByteArray Settings::serialize() const {
 			<< _groupCallPushToTalkShortcut
 			<< qint64(_groupCallPushToTalkDelay)
 			<< qint32(0) // Call audio backend
-			<< qint32(_disableCalls ? 1 : 0);
+			<< qint32(_disableCalls ? 1 : 0)
+			<< windowPosition
+			<< qint32(recentEmojiPreloadData.size());
+		for (const auto &[id, rating] : recentEmojiPreloadData) {
+			stream << id << quint16(rating);
+		}
+		stream
+			<< qint32(_emojiVariants.size());
+		for (const auto &[id, variant] : _emojiVariants) {
+			stream << id << quint8(variant);
+		}
 	}
 	return result;
 }
@@ -188,6 +266,9 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	qint64 groupCallPushToTalkDelay = _groupCallPushToTalkDelay;
 	qint32 callAudioBackend = 0;
 	qint32 disableCalls = _disableCalls ? 1 : 0;
+	QByteArray windowPosition;
+	std::vector<RecentEmojiId> recentEmojiPreload;
+	base::flat_map<QString, uint8> emojiVariants;
 
 	stream >> themesAccentColors;
 	if (!stream.atEnd()) {
@@ -289,6 +370,33 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	if (!stream.atEnd()) {
 		stream >> disableCalls;
 	}
+	if (!stream.atEnd()) {
+		stream >> windowPosition;
+	}
+	if (!stream.atEnd()) {
+		auto recentCount = qint32(0);
+		stream >> recentCount;
+		if (recentCount > 0 && recentCount < 10000) {
+			recentEmojiPreload.reserve(recentCount);
+			for (auto i = 0; i != recentCount; ++i) {
+				auto id = QString();
+				auto rating = quint16();
+				stream >> id >> rating;
+				recentEmojiPreload.push_back({ id, rating });
+			}
+		}
+		auto variantsCount = qint32(0);
+		stream >> variantsCount;
+		if (variantsCount > 0 && variantsCount < 10000) {
+			emojiVariants.reserve(variantsCount);
+			for (auto i = 0; i != variantsCount; ++i) {
+				auto id = QString();
+				auto variant = quint8();
+				stream >> id >> variant;
+				emojiVariants.emplace(id, variant);
+			}
+		}
+	}
 	if (stream.status() != QDataStream::Ok) {
 		LOG(("App Error: "
 			"Bad data for Core::Settings::constructFromSerialized()"));
@@ -389,6 +497,11 @@ void Settings::addFromSerialized(const QByteArray &serialized) {
 	_groupCallPushToTalkShortcut = groupCallPushToTalkShortcut;
 	_groupCallPushToTalkDelay = groupCallPushToTalkDelay;
 	_disableCalls = (disableCalls == 1);
+	if (!windowPosition.isEmpty()) {
+		_windowPosition = Deserialize(windowPosition);
+	}
+	_recentEmojiPreload = std::move(recentEmojiPreload);
+	_emojiVariants = std::move(emojiVariants);
 }
 
 bool Settings::chatWide() const {
@@ -468,6 +581,118 @@ rpl::producer<int> Settings::thirdColumnWidthChanges() const {
 	return _thirdColumnWidth.changes();
 }
 
+const std::vector<Settings::RecentEmoji> &Settings::recentEmoji() const {
+	if (_recentEmoji.empty()) {
+		resolveRecentEmoji();
+	}
+	return _recentEmoji;
+}
+
+void Settings::resolveRecentEmoji() const {
+	const auto haveAlready = [&](EmojiPtr emoji) {
+		return ranges::contains(
+			_recentEmoji,
+			emoji->id(),
+			[](const RecentEmoji &data) { return data.emoji->id(); });
+	};
+	if (!_recentEmojiPreload.empty()) {
+		_recentEmoji.reserve(_recentEmojiPreload.size());
+		for (const auto &[id, rating] : base::take(_recentEmojiPreload)) {
+			if (const auto emoji = Ui::Emoji::Find(id)) {
+				if (!haveAlready(emoji)) {
+					_recentEmoji.push_back({ emoji, rating });
+				}
+			}
+		}
+		_recentEmojiPreload.clear();
+	}
+	for (const auto emoji : Ui::Emoji::GetDefaultRecent()) {
+		if (_recentEmoji.size() >= kRecentEmojiLimit) {
+			break;
+		} else if (!haveAlready(emoji)) {
+			_recentEmoji.push_back({ emoji, 1 });
+		}
+	}
+}
+
+EmojiPack Settings::recentEmojiSection() const {
+	const auto &recent = recentEmoji();
+
+	auto result = EmojiPack();
+	result.reserve(recent.size());
+	for (const auto [emoji, rating] : recent) {
+		result.push_back(emoji);
+	}
+	return result;
+}
+
+void Settings::incrementRecentEmoji(EmojiPtr emoji) {
+	resolveRecentEmoji();
+
+	auto i = _recentEmoji.begin(), e = _recentEmoji.end();
+	for (; i != e; ++i) {
+		if (i->emoji == emoji) {
+			++i->rating;
+			if (i->rating > 0x8000) {
+				for (auto j = _recentEmoji.begin(); j != e; ++j) {
+					if (j->rating > 1) {
+						j->rating /= 2;
+					} else {
+						j->rating = 1;
+					}
+				}
+			}
+			for (; i != _recentEmoji.begin(); --i) {
+				if ((i - 1)->rating > i->rating) {
+					break;
+				}
+				std::swap(*i, *(i - 1));
+			}
+			break;
+		}
+	}
+	if (i == e) {
+		while (_recentEmoji.size() >= kRecentEmojiLimit) {
+			_recentEmoji.pop_back();
+		}
+		_recentEmoji.push_back({ emoji, 1 });
+		for (i = _recentEmoji.end() - 1; i != _recentEmoji.begin(); --i) {
+			if ((i - 1)->rating > i->rating) {
+				break;
+			}
+			std::swap(*i, *(i - 1));
+		}
+	}
+	_recentEmojiUpdated.fire({});
+	_saveDelayed.fire({});
+}
+
+void Settings::setLegacyRecentEmojiPreload(
+		QVector<QPair<QString, ushort>> data) {
+	if (!_recentEmojiPreload.empty() || data.isEmpty()) {
+		return;
+	}
+	_recentEmojiPreload.reserve(data.size());
+	for (const auto &[id, rating] : data) {
+		_recentEmojiPreload.push_back({ id, rating });
+	}
+}
+
+void Settings::saveEmojiVariant(EmojiPtr emoji) {
+	_emojiVariants[emoji->nonColoredId()] = emoji->variantIndex(emoji);
+	_saveDelayed.fire({});
+}
+
+void Settings::setLegacyEmojiVariants(QMap<QString, int> data) {
+	if (!_emojiVariants.empty() || data.isEmpty()) {
+		return;
+	}
+	_emojiVariants.reserve(data.size());
+	for (auto i = data.begin(), e = data.end(); i != e; ++i) {
+		_emojiVariants.emplace(i.key(), i.value());
+	}
+}
+
 void Settings::resetOnLastLogout() {
 	_adaptiveForWide = true;
 	_moderateModeEnabled = false;
@@ -535,6 +760,10 @@ void Settings::resetOnLastLogout() {
 	_notifyFromAll = true;
 	_tabbedReplacedWithInfo = false; // per-window
 	_systemDarkModeEnabled = false;
+
+	_recentEmojiPreload.clear();
+	_recentEmoji.clear();
+	_emojiVariants.clear();
 }
 
 bool Settings::ThirdColumnByDefault() {

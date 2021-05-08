@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/ui_utility.h"
 #include "dialogs/dialogs_layout.h"
 #include "window/themes/window_theme.h"
+#include "window/window_controller.h"
 #include "storage/file_download.h"
 #include "main/main_session.h"
 #include "main/main_account.h"
@@ -29,12 +30,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/call_delayed.h"
 #include "facades.h"
 #include "app.h"
-#include "mainwindow.h"
 #include "styles/style_dialogs.h"
 #include "styles/style_layers.h"
 #include "styles/style_window.h"
 
-#include <QtCore/QCoreApplication>
+#include <QtGui/QGuiApplication>
+#include <QtGui/QScreen>
 
 namespace Window {
 namespace Notifications {
@@ -47,7 +48,10 @@ int notificationMaxHeight() {
 
 QPoint notificationStartPosition() {
 	const auto corner = Core::App().settings().notificationsCorner();
-	const auto r = psDesktopRect();
+	const auto window = Core::App().activeWindow();
+	const auto r = window
+		? window->widget()->desktopRect()
+		: QGuiApplication::primaryScreen()->availableGeometry();
 	const auto isLeft = Core::Settings::IsLeftCorner(corner);
 	const auto isTop = Core::Settings::IsTopCorner(corner);
 	const auto x = (isLeft == rtl()) ? (r.x() + r.width() - st::notifyWidth - st::notifyDeltaX) : (r.x() + st::notifyDeltaX);
@@ -400,6 +404,18 @@ void Manager::doClearFromItem(not_null<HistoryItem*> item) {
 	}
 }
 
+bool Manager::doSkipAudio() const {
+	return Platform::Notifications::SkipAudioForCustom();
+}
+
+bool Manager::doSkipToast() const {
+	return Platform::Notifications::SkipToastForCustom();
+}
+
+bool Manager::doSkipFlashBounce() const {
+	return Platform::Notifications::SkipFlashBounceForCustom();
+}
+
 void Manager::doUpdateAll() {
 	for_const (auto &notification, _notifications) {
 		notification->updateNotifyDisplay();
@@ -417,8 +433,7 @@ Widget::Widget(
 	QPoint startPosition,
 	int shift,
 	Direction shiftDirection)
-: RpWidget(Core::App().getModalParent())
-, _manager(manager)
+: _manager(manager)
 , _startPosition(startPosition)
 , _direction(shiftDirection)
 , _shift(shift)
@@ -722,7 +737,7 @@ void Notification::actionsOpacityCallback() {
 void Notification::updateNotifyDisplay() {
 	if (!_history || (!_item && _forwardedCount < 2)) return;
 
-	const auto options = Manager::GetNotificationOptions(_item);
+	const auto options = manager()->getNotificationOptions(_item);
 	_hideReplyButton = options.hideReplyButton;
 
 	int32 w = width(), h = height();

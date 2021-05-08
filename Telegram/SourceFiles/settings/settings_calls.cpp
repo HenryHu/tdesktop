@@ -14,7 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/level_meter.h"
 #include "ui/widgets/buttons.h"
-#include "boxes/single_choice_box.h"
+#include "ui/boxes/single_choice_box.h"
 #include "boxes/confirm_box.h"
 #include "platform/platform_specific.h"
 #include "main/main_session.h"
@@ -101,9 +101,9 @@ void Calls::setupContent() {
 			st::settingsButton
 		)->addClickHandler([=] {
 			const auto &devices = GetVideoInputList();
-			const auto options = ranges::view::concat(
-				ranges::view::single(tr::lng_settings_call_device_default(tr::now)),
-				devices | ranges::view::transform(&VideoInput::name)
+			const auto options = ranges::views::concat(
+				ranges::views::single(tr::lng_settings_call_device_default(tr::now)),
+				devices | ranges::views::transform(&VideoInput::name)
 			) | ranges::to_vector;
 			const auto i = ranges::find(
 				devices,
@@ -124,11 +124,14 @@ void Calls::setupContent() {
 					call->setCurrentVideoDevice(deviceId);
 				}
 			});
-			Ui::show(Box<SingleChoiceBox>(
-				tr::lng_settings_call_camera(),
-				options,
-				currentOption,
-				save));
+			Ui::show(Box([=](not_null<Ui::GenericBox*> box) {
+				SingleChoiceBox(box, {
+					.title = tr::lng_settings_call_camera(),
+					.options = options,
+					.initialSelection = currentOption,
+					.callback = save,
+				});
+			}));
 		});
 		const auto bubbleWrap = content->add(object_ptr<Ui::RpWidget>(content));
 		const auto bubble = content->lifetime().make_state<::Calls::VideoBubble>(
@@ -366,15 +369,15 @@ QString CurrentAudioInputName() {
 		: tr::lng_settings_call_device_default(tr::now);
 }
 
-object_ptr<SingleChoiceBox> ChooseAudioOutputBox(
+object_ptr<Ui::GenericBox> ChooseAudioOutputBox(
 		Fn<void(QString id, QString name)> chosen,
 		const style::Checkbox *st,
 		const style::Radio *radioSt) {
 	const auto &settings = Core::App().settings();
 	const auto list = GetAudioOutputList(settings.callAudioBackend());
-	const auto options = ranges::view::concat(
-		ranges::view::single(tr::lng_settings_call_device_default(tr::now)),
-		list | ranges::view::transform(&AudioOutput::name)
+	const auto options = ranges::views::concat(
+		ranges::views::single(tr::lng_settings_call_device_default(tr::now)),
+		list | ranges::views::transform(&AudioOutput::name)
 	) | ranges::to_vector;
 	const auto i = ranges::find(
 		list,
@@ -390,24 +393,27 @@ object_ptr<SingleChoiceBox> ChooseAudioOutputBox(
 		Core::App().calls().setCurrentAudioDevice(false, deviceId);
 		chosen(deviceId, options[option]);
 	};
-	return Box<SingleChoiceBox>(
-		tr::lng_settings_call_output_device(),
-		options,
-		currentOption,
-		save,
-		st,
-		radioSt);
+	return Box([=](not_null<Ui::GenericBox*> box) {
+		SingleChoiceBox(box, {
+			.title = tr::lng_settings_call_output_device(),
+			.options = options,
+			.initialSelection = currentOption,
+			.callback = save,
+			.st = st,
+			.radioSt = radioSt,
+		});
+	});
 }
 
-object_ptr<SingleChoiceBox> ChooseAudioInputBox(
+object_ptr<Ui::GenericBox> ChooseAudioInputBox(
 		Fn<void(QString id, QString name)> chosen,
 		const style::Checkbox *st,
 		const style::Radio *radioSt) {
 	const auto &settings = Core::App().settings();
 	const auto list = GetAudioInputList(settings.callAudioBackend());
-	const auto options = ranges::view::concat(
-		ranges::view::single(tr::lng_settings_call_device_default(tr::now)),
-		list | ranges::view::transform(&AudioInput::name)
+	const auto options = ranges::views::concat(
+		ranges::views::single(tr::lng_settings_call_device_default(tr::now)),
+		list | ranges::views::transform(&AudioInput::name)
 	) | ranges::to_vector;
 	const auto i = ranges::find(
 		list,
@@ -423,16 +429,19 @@ object_ptr<SingleChoiceBox> ChooseAudioInputBox(
 		Core::App().calls().setCurrentAudioDevice(true, deviceId);
 		chosen(deviceId, options[option]);
 	};
-	return Box<SingleChoiceBox>(
-		tr::lng_settings_call_input_device(),
-		options,
-		currentOption,
-		save,
-		st,
-		radioSt);
+	return Box([=](not_null<Ui::GenericBox*> box) {
+		SingleChoiceBox(box, {
+			.title = tr::lng_settings_call_input_device(),
+			.options = options,
+			.initialSelection = currentOption,
+			.callback = save,
+			.st = st,
+			.radioSt = radioSt,
+		});
+	});
 }
-
-//object_ptr<SingleChoiceBox> ChooseAudioBackendBox(
+//
+//object_ptr<Ui::GenericBox> ChooseAudioBackendBox(
 //		const style::Checkbox *st,
 //		const style::Radio *radioSt) {
 //	const auto &settings = Core::App().settings();
@@ -451,13 +460,16 @@ object_ptr<SingleChoiceBox> ChooseAudioInputBox(
 //		Core::App().saveSettings();
 //		App::restart();
 //	};
-//	return Box<SingleChoiceBox>(
-//		rpl::single<QString>("Calls audio backend"),
-//		options,
-//		currentOption,
-//		save,
-//		st,
-//		radioSt);
+//	return Box([=](not_null<Ui::GenericBox*> box) {
+//		SingleChoiceBox(box, {
+//			.title = rpl::single<QString>("Calls audio backend"),
+//			.options = options,
+//			.initialSelection = currentOption,
+//			.callback = save,
+//			.st = st,
+//			.radioSt = radioSt,
+//		});
+//	});
 //}
 
 } // namespace Settings
