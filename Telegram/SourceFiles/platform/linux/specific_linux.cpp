@@ -48,7 +48,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <gio/gio.h>
 #include <glibmm.h>
 #include <giomm.h>
-#include <jemalloc/jemalloc.h>
+#include <malloc_np.h>
 
 #include <sys/stat.h>
 #include <sys/types.h>
