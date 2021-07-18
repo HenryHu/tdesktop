@@ -52,7 +52,8 @@ constexpr auto kSystemAlertDuration = crl::time(0);
 System::System()
 : _waitTimer([=] { showNext(); })
 , _waitForAllGroupedTimer([=] { showGrouped(); }) {
-	subscribe(settingsChanged(), [=](ChangeType type) {
+	settingsChanged(
+	) | rpl::start_with_next([=](ChangeType type) {
 		if (type == ChangeType::DesktopEnabled) {
 			clearAll();
 		} else if (type == ChangeType::ViewParams) {
@@ -61,7 +62,7 @@ System::System()
 			|| type == ChangeType::CountMessages) {
 			Core::App().domain().notifyUnreadBadgeChanged();
 		}
-	});
+	}, lifetime());
 }
 
 void System::createManager() {
@@ -362,7 +363,6 @@ void System::showNext() {
 
 	auto ms = crl::now(), nextAlert = crl::time(0);
 	bool alert = false;
-	int32 now = base::unixtime::now();
 	for (auto i = _whenAlerts.begin(); i != _whenAlerts.end();) {
 		while (!i->second.empty() && i->second.begin()->first <= ms) {
 			const auto peer = i->first->peer;
@@ -578,6 +578,14 @@ void System::updateAll() {
 	}
 }
 
+rpl::producer<ChangeType> System::settingsChanged() const {
+	return _settingsChanged.events();
+}
+
+void System::notifySettingsChanged(ChangeType type) {
+	return _settingsChanged.fire(std::move(type));
+}
+
 Manager::DisplayOptions Manager::getNotificationOptions(
 		HistoryItem *item) const {
 	const auto hideEverything = Core::App().passcodeLocked()
@@ -585,8 +593,10 @@ Manager::DisplayOptions Manager::getNotificationOptions(
 
 	const auto view = Core::App().settings().notifyView();
 	DisplayOptions result;
-	result.hideNameAndPhoto = hideEverything || (view > dbinvShowName);
-	result.hideMessageText = hideEverything || (view > dbinvShowPreview);
+	result.hideNameAndPhoto = hideEverything
+		|| (view > Core::Settings::NotifyView::ShowName);
+	result.hideMessageText = hideEverything
+		|| (view > Core::Settings::NotifyView::ShowPreview);
 	result.hideReplyButton = result.hideMessageText
 		|| !item
 		|| ((item->out() || item->history()->peer->isSelf())
@@ -736,7 +746,7 @@ void NativeManager::doShowNotification(
 }
 
 bool NativeManager::forceHideDetails() const {
-	return Global::ScreenIsLocked();
+	return Core::App().screenIsLocked();
 }
 
 System::~System() = default;

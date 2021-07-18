@@ -37,6 +37,8 @@ public:
 	void unregisterLeaveSubscription(not_null<QWidget*> widget) override;
 
 	QString emojiCacheFolder() override;
+	QString openglCheckFilePath() override;
+	QString angleBackendFilePath() override;
 
 	void textActionsUpdated() override;
 	void activationFromTopPanel() override;
@@ -70,5 +72,7 @@ public:
 	QString phraseFormattingMonospace() override;
 
 };
+
+[[nodiscard]] bool OpenGLLastCheckFailed();
 
 } // namespace Core

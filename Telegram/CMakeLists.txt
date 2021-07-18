@@ -19,6 +19,9 @@ endif()
 add_subdirectory(lib_storage)
 add_subdirectory(lib_lottie)
 add_subdirectory(lib_qr)
+if (LINUX AND NOT DESKTOP_APP_DISABLE_WAYLAND_INTEGRATION)
+    add_subdirectory(lib_waylandshells)
+endif()
 add_subdirectory(lib_webrtc)
 add_subdirectory(lib_webview)
 add_subdirectory(codegen)
@@ -80,12 +83,7 @@ PRIVATE
     desktop-app::external_xxhash
 )
 
-if (WIN32)
-    target_link_libraries(Telegram
-    PRIVATE
-        desktop-app::lib_webview_winrt
-    )
-elseif (LINUX)
+if (LINUX)
     target_link_libraries(Telegram
     PRIVATE
         desktop-app::external_glibmm
@@ -110,11 +108,13 @@ elseif (LINUX)
     if (NOT DESKTOP_APP_DISABLE_WAYLAND_INTEGRATION)
         target_link_libraries(Telegram
         PRIVATE
+            desktop-app::lib_waylandshells
             desktop-app::external_kwayland
         )
     endif()
 
     if (NOT DESKTOP_APP_DISABLE_GTK_INTEGRATION)
+        target_link_libraries(Telegram PRIVATE rt)
         find_package(PkgConfig REQUIRED)
 
         if (DESKTOP_APP_USE_PACKAGED AND NOT DESKTOP_APP_USE_PACKAGED_LAZY)
@@ -126,7 +126,7 @@ elseif (LINUX)
                 target_link_libraries(Telegram PRIVATE PkgConfig::X11)
             endif()
         else()
-            pkg_search_module(GTK REQUIRED gtk+-3.0 gtk+-2.0)
+            pkg_check_modules(GTK REQUIRED gtk+-3.0)
             target_include_directories(Telegram PRIVATE ${GTK_INCLUDE_DIRS})
 
             if (NOT DESKTOP_APP_DISABLE_X11_INTEGRATION)
@@ -252,8 +252,6 @@ PRIVATE
     boxes/peer_lists_box.h
     boxes/passcode_box.cpp
     boxes/passcode_box.h
-    boxes/photo_crop_box.cpp
-    boxes/photo_crop_box.h
     boxes/rate_call_box.cpp
     boxes/rate_call_box.h
     boxes/self_destruction_box.cpp
@@ -272,23 +270,39 @@ PRIVATE
     boxes/url_auth_box.h
     boxes/username_box.cpp
     boxes/username_box.h
+    calls/group/calls_choose_join_as.cpp
+    calls/group/calls_choose_join_as.h
+    calls/group/calls_group_call.cpp
+    calls/group/calls_group_call.h
+    calls/group/calls_group_common.h
+    calls/group/calls_group_invite_controller.cpp
+    calls/group/calls_group_invite_controller.h
+    calls/group/calls_group_members.cpp
+    calls/group/calls_group_members.h
+    calls/group/calls_group_members_row.cpp
+    calls/group/calls_group_members_row.h
+    calls/group/calls_group_menu.cpp
+    calls/group/calls_group_menu.h
+    calls/group/calls_group_panel.cpp
+    calls/group/calls_group_panel.h
+    calls/group/calls_group_settings.cpp
+    calls/group/calls_group_settings.h
+    calls/group/calls_group_toasts.cpp
+    calls/group/calls_group_toasts.h
+    calls/group/calls_group_viewport.cpp
+    calls/group/calls_group_viewport.h
+    calls/group/calls_group_viewport_opengl.cpp
+    calls/group/calls_group_viewport_opengl.h
+    calls/group/calls_group_viewport_raster.cpp
+    calls/group/calls_group_viewport_raster.h
+    calls/group/calls_group_viewport_tile.cpp
+    calls/group/calls_group_viewport_tile.h
+    calls/group/calls_volume_item.cpp
+    calls/group/calls_volume_item.h
     calls/calls_box_controller.cpp
     calls/calls_box_controller.h
     calls/calls_call.cpp
     calls/calls_call.h
-    calls/calls_choose_join_as.cpp
-    calls/calls_choose_join_as.h
-    calls/calls_group_call.cpp
-    calls/calls_group_call.h
-    calls/calls_group_common.h
-    calls/calls_group_members.cpp
-    calls/calls_group_members.h
-    calls/calls_group_menu.cpp
-    calls/calls_group_menu.h
-    calls/calls_group_panel.cpp
-    calls/calls_group_panel.h
-    calls/calls_group_settings.cpp
-    calls/calls_group_settings.h
     calls/calls_emoji_fingerprint.cpp
     calls/calls_emoji_fingerprint.h
     calls/calls_instance.cpp
@@ -303,8 +317,8 @@ PRIVATE
     calls/calls_userpic.h
     calls/calls_video_bubble.cpp
     calls/calls_video_bubble.h
-    calls/calls_volume_item.cpp
-    calls/calls_volume_item.h
+    calls/calls_video_incoming.cpp
+    calls/calls_video_incoming.h
     chat_helpers/bot_keyboard.cpp
     chat_helpers/bot_keyboard.h
     chat_helpers/emoji_keywords.cpp
@@ -353,6 +367,8 @@ PRIVATE
     core/core_cloud_password.h
     core/core_settings.cpp
     core/core_settings.h
+    core/core_settings_proxy.cpp
+    core/core_settings_proxy.h
     core/crash_report_window.cpp
     core/crash_report_window.h
     core/crash_reports.cpp
@@ -378,6 +394,7 @@ PRIVATE
     data/stickers/data_stickers_set.h
     data/stickers/data_stickers.cpp
     data/stickers/data_stickers.h
+    data/data_abstract_sparse_ids.h
     data/data_abstract_structure.cpp
     data/data_abstract_structure.h
     data/data_auto_download.cpp
@@ -400,10 +417,14 @@ PRIVATE
     data/data_document.h
     data/data_document_media.cpp
     data/data_document_media.h
+    data/data_document_resolver.cpp
+    data/data_document_resolver.h
     data/data_drafts.cpp
     data/data_drafts.h
     data/data_folder.cpp
     data/data_folder.h
+    data/data_file_click_handler.cpp
+    data/data_file_click_handler.h
     data/data_file_origin.cpp
     data/data_file_origin.h
     data/data_flags.h
@@ -486,6 +507,40 @@ PRIVATE
     dialogs/dialogs_search_from_controllers.h
     dialogs/dialogs_widget.cpp
     dialogs/dialogs_widget.h
+    editor/color_picker.cpp
+    editor/color_picker.h
+    editor/controllers/controllers.h
+    editor/controllers/stickers_panel_controller.cpp
+    editor/controllers/stickers_panel_controller.h
+    editor/controllers/undo_controller.cpp
+    editor/controllers/undo_controller.h
+    editor/editor_crop.cpp
+    editor/editor_crop.h
+    editor/editor_paint.cpp
+    editor/editor_paint.h
+    editor/photo_editor.cpp
+    editor/photo_editor.h
+    editor/photo_editor_common.cpp
+    editor/photo_editor_common.h
+    editor/photo_editor_content.cpp
+    editor/photo_editor_content.h
+    editor/photo_editor_controls.cpp
+    editor/photo_editor_controls.h
+    editor/photo_editor_inner_common.h
+    editor/photo_editor_layer_widget.cpp
+    editor/photo_editor_layer_widget.h
+    editor/scene/scene.cpp
+    editor/scene/scene.h
+    editor/scene/scene_item_base.cpp
+    editor/scene/scene_item_base.h
+    editor/scene/scene_item_canvas.cpp
+    editor/scene/scene_item_canvas.h
+    editor/scene/scene_item_image.cpp
+    editor/scene/scene_item_image.h
+    editor/scene/scene_item_line.cpp
+    editor/scene/scene_item_line.h
+    editor/scene/scene_item_sticker.cpp
+    editor/scene/scene_item_sticker.h
     export/export_manager.cpp
     export/export_manager.h
     export/view/export_view_content.cpp
@@ -709,6 +764,8 @@ PRIVATE
     main/main_session.h
     main/main_session_settings.cpp
     main/main_session_settings.h
+    media/system_media_controls_manager.h
+    media/system_media_controls_manager.cpp
     media/audio/media_audio.cpp
     media/audio/media_audio.h
     media/audio/media_audio_capture.cpp
@@ -763,14 +820,25 @@ PRIVATE
     media/streaming/media_streaming_video_track.h
     media/view/media_view_group_thumbs.cpp
     media/view/media_view_group_thumbs.h
+    media/view/media_view_overlay_opengl.cpp
+    media/view/media_view_overlay_opengl.h
+    media/view/media_view_overlay_raster.cpp
+    media/view/media_view_overlay_raster.h
+    media/view/media_view_overlay_renderer.h
     media/view/media_view_overlay_widget.cpp
     media/view/media_view_overlay_widget.h
     media/view/media_view_pip.cpp
     media/view/media_view_pip.h
+    media/view/media_view_pip_opengl.cpp
+    media/view/media_view_pip_opengl.h
+    media/view/media_view_pip_raster.cpp
+    media/view/media_view_pip_raster.h
+    media/view/media_view_pip_renderer.h
     media/view/media_view_playback_controls.cpp
     media/view/media_view_playback_controls.h
     media/view/media_view_playback_progress.cpp
     media/view/media_view_playback_progress.h
+    media/view/media_view_open_common.h
     mtproto/config_loader.cpp
     mtproto/config_loader.h
     mtproto/connection_abstract.cpp
@@ -829,17 +897,15 @@ PRIVATE
     platform/linux/linux_gdk_helper.h
     platform/linux/linux_gsd_media_keys.cpp
     platform/linux/linux_gsd_media_keys.h
-    platform/linux/linux_gtk_file_dialog.cpp
-    platform/linux/linux_gtk_file_dialog.h
+    platform/linux/linux_gtk_integration_dummy.cpp
     platform/linux/linux_gtk_integration_p.h
     platform/linux/linux_gtk_integration.cpp
     platform/linux/linux_gtk_integration.h
     platform/linux/linux_gtk_open_with_dialog.cpp
     platform/linux/linux_gtk_open_with_dialog.h
-    platform/linux/linux_mpris_support.cpp
-    platform/linux/linux_mpris_support.h
     platform/linux/linux_notification_service_watcher.cpp
     platform/linux/linux_notification_service_watcher.h
+    platform/linux/linux_wayland_integration_dummy.cpp
     platform/linux/linux_wayland_integration.cpp
     platform/linux/linux_wayland_integration.h
     platform/linux/linux_xdp_file_dialog.cpp
@@ -852,6 +918,7 @@ PRIVATE
     platform/linux/launcher_linux.h
     platform/linux/main_window_linux.cpp
     platform/linux/main_window_linux.h
+    platform/linux/notifications_manager_linux_dummy.cpp
     platform/linux/notifications_manager_linux.cpp
     platform/linux/notifications_manager_linux.h
     platform/linux/specific_linux.cpp
@@ -861,6 +928,7 @@ PRIVATE
     platform/mac/file_utilities_mac.h
     platform/mac/launcher_mac.mm
     platform/mac/launcher_mac.h
+    platform/mac/mac_iconv_helper.c
     platform/mac/main_window_mac.mm
     platform/mac/main_window_mac.h
     platform/mac/notifications_manager_mac.mm
@@ -1002,6 +1070,10 @@ PRIVATE
     support/support_helper.h
     support/support_templates.cpp
     support/support_templates.h
+    ui/chat/attach/attach_item_single_file_preview.cpp
+    ui/chat/attach/attach_item_single_file_preview.h
+    ui/chat/attach/attach_item_single_media_preview.cpp
+    ui/chat/attach/attach_item_single_media_preview.h
     ui/effects/fireworks_animation.cpp
     ui/effects/fireworks_animation.h
     ui/effects/round_checkbox.cpp
@@ -1037,6 +1109,8 @@ PRIVATE
     ui/search_field_controller.h
     ui/special_buttons.cpp
     ui/special_buttons.h
+    ui/text/format_song_document_name.cpp
+    ui/text/format_song_document_name.h
     ui/unread_badge.cpp
     ui/unread_badge.h
     window/main_window.cpp
@@ -1050,6 +1124,8 @@ PRIVATE
     window/section_memento.h
     window/section_widget.cpp
     window/section_widget.h
+    window/window_adaptive.cpp
+    window/window_adaptive.h
     window/window_connecting_widget.cpp
     window/window_connecting_widget.h
     window/window_controller.cpp
@@ -1136,38 +1212,41 @@ if (DESKTOP_APP_DISABLE_DBUS_INTEGRATION)
         platform/linux/linux_xdp_open_with_dialog.h
         platform/linux/notifications_manager_linux.cpp
     )
-
-    nice_target_sources(Telegram ${src_loc}
-    PRIVATE
+else()
+    remove_target_sources(Telegram ${src_loc}
         platform/linux/notifications_manager_linux_dummy.cpp
     )
 endif()
 
 if (DESKTOP_APP_DISABLE_WAYLAND_INTEGRATION)
-    remove_target_sources(Telegram ${src_loc} platform/linux/linux_wayland_integration.cpp)
-    nice_target_sources(Telegram ${src_loc} PRIVATE platform/linux/linux_wayland_integration_dummy.cpp)
+    remove_target_sources(Telegram ${src_loc}
+        platform/linux/linux_wayland_integration.cpp
+    )
+else()
+    remove_target_sources(Telegram ${src_loc}
+        platform/linux/linux_wayland_integration_dummy.cpp
+    )
 endif()
 
 if (DESKTOP_APP_DISABLE_GTK_INTEGRATION)
     remove_target_sources(Telegram ${src_loc}
         platform/linux/linux_gdk_helper.cpp
         platform/linux/linux_gdk_helper.h
-        platform/linux/linux_gtk_file_dialog.cpp
-        platform/linux/linux_gtk_file_dialog.h
         platform/linux/linux_gtk_integration_p.h
         platform/linux/linux_gtk_integration.cpp
         platform/linux/linux_gtk_open_with_dialog.cpp
         platform/linux/linux_gtk_open_with_dialog.h
     )
-
-    nice_target_sources(Telegram ${src_loc}
-    PRIVATE
+else()
+    remove_target_sources(Telegram ${src_loc}
         platform/linux/linux_gtk_integration_dummy.cpp
     )
 endif()
 
-if (NOT DESKTOP_APP_USE_PACKAGED)
-    nice_target_sources(Telegram ${src_loc} PRIVATE platform/mac/mac_iconv_helper.c)
+if (DESKTOP_APP_USE_PACKAGED)
+    remove_target_sources(Telegram ${src_loc}
+        platform/mac/mac_iconv_helper.c
+    )
 endif()
 
 nice_target_sources(Telegram ${res_loc}
@@ -1203,8 +1282,6 @@ if (WIN32)
     #     $<IF:${release},"Appending compatibility manifest.","Finalizing build.">
     # )
 elseif (APPLE)
-    target_link_libraries(Telegram PRIVATE desktop-app::external_sp_media_key_tap)
-
     if (NOT DESKTOP_APP_USE_PACKAGED)
         target_link_libraries(Telegram PRIVATE desktop-app::external_iconv)
     endif()
@@ -1319,6 +1396,32 @@ endif()
 
 set_target_properties(Telegram PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${output_folder})
 
+if (WIN32)
+    target_link_options(Telegram
+    PRIVATE
+        /DELAYLOAD:secur32.dll
+        /DELAYLOAD:winmm.dll
+        /DELAYLOAD:ws2_32.dll
+        /DELAYLOAD:user32.dll
+        /DELAYLOAD:gdi32.dll
+        /DELAYLOAD:advapi32.dll
+        /DELAYLOAD:shell32.dll
+        /DELAYLOAD:ole32.dll
+        /DELAYLOAD:oleaut32.dll
+        /DELAYLOAD:shlwapi.dll
+        /DELAYLOAD:iphlpapi.dll
+        /DELAYLOAD:gdiplus.dll
+        /DELAYLOAD:version.dll
+        /DELAYLOAD:dwmapi.dll
+        /DELAYLOAD:crypt32.dll
+        /DELAYLOAD:bcrypt.dll
+        /DELAYLOAD:imm32.dll
+        /DELAYLOAD:netapi32.dll
+        /DELAYLOAD:userenv.dll
+        /DELAYLOAD:wtsapi32.dll
+    )
+endif()
+
 if ((NOT DESKTOP_APP_DISABLE_AUTOUPDATE OR APPLE) AND NOT build_macstore AND NOT build_winstore)
     add_executable(Updater WIN32)
     init_target(Updater)
@@ -1335,8 +1438,26 @@ if ((NOT DESKTOP_APP_DISABLE_AUTOUPDATE OR APPLE) AND NOT build_macstore AND NOT
 
     set_target_properties(Updater PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${output_folder})
 
-    if (WIN32 AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-        target_link_options(Updater PRIVATE -municode)
+    if (WIN32)
+        get_filename_component(lib_base_loc lib_base REALPATH)
+        nice_target_sources(Updater ${lib_base_loc}
+        PRIVATE
+            base/platform/win/base_windows_safe_library.cpp
+            base/platform/win/base_windows_safe_library.h
+        )
+        target_include_directories(Updater PRIVATE ${lib_base_loc})
+        if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+            target_link_options(Updater
+            PRIVATE
+                /DELAYLOAD:user32.dll
+                /DELAYLOAD:advapi32.dll
+                /DELAYLOAD:shell32.dll
+                /DELAYLOAD:ole32.dll
+                /DELAYLOAD:shlwapi.dll
+            )
+        else()
+            target_link_options(Updater PRIVATE -municode)
+        endif()
     endif()
 
     if (LINUX)

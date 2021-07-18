@@ -13,7 +13,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/platform/base_platform_info.h"
 #include "ui/platform/ui_platform_utility.h"
 #include "history/history.h"
-#include "window/themes/window_theme.h"
 #include "window/window_session_controller.h"
 #include "window/window_lock_widgets.h"
 #include "window/window_outdated_bar.h"
@@ -80,7 +79,6 @@ void ConvertIconToBlack(QImage &image) {
 	constexpr auto igreen = shifter(green);
 	constexpr auto iblue = shifter(blue);
 	constexpr auto threshold = 100;
-	constexpr auto ithreshold = shifter(threshold);
 
 	const auto width = image.width();
 	const auto height = image.height();
@@ -113,7 +111,7 @@ QIcon CreateOfficialIcon(Main::Session *session) {
 	if (session && session->supportMode()) {
 		ConvertIconToBlack(image);
 	}
-	return QIcon(App::pixmapFromImageInPlace(std::move(image)));
+	return QIcon(Ui::PixmapFromImage(std::move(image)));
 }
 
 QIcon CreateIcon(Main::Session *session) {
@@ -166,21 +164,20 @@ MainWindow::MainWindow(not_null<Controller*> controller)
 , _outdated(CreateOutdatedBar(this))
 , _body(this)
 , _titleText(qsl("Telegram")) {
-	subscribe(Theme::Background(), [=](
-			const Theme::BackgroundUpdate &data) {
-		if (data.paletteChanged()) {
-			updatePalette();
-		}
-	});
+	style::PaletteChanged(
+	) | rpl::start_with_next([=] {
+		updatePalette();
+	}, lifetime());
 
 	Core::App().unreadBadgeChanges(
 	) | rpl::start_with_next([=] {
 		updateUnreadCounter();
 	}, lifetime());
 
-	subscribe(Global::RefWorkMode(), [=](DBIWorkMode mode) {
+	Core::App().settings().workModeChanges(
+	) | rpl::start_with_next([=](Core::Settings::WorkMode mode) {
 		workmodeUpdated(mode);
-	});
+	}, lifetime());
 
 	Ui::Toast::SetDefaultParent(_body.data());
 
@@ -209,7 +206,9 @@ bool MainWindow::hideNoQuit() {
 	if (App::quitting()) {
 		return false;
 	}
-	if (Global::WorkMode().value() == dbiwmTrayOnly || Global::WorkMode().value() == dbiwmWindowAndTray) {
+	const auto workMode = Core::App().settings().workMode();
+	if (workMode == Core::Settings::WorkMode::TrayOnly
+		|| workMode == Core::Settings::WorkMode::WindowAndTray) {
 		if (minimizeToTray()) {
 			if (const auto controller = sessionController()) {
 				Ui::showChatsList(&controller->session());
@@ -234,8 +233,11 @@ void MainWindow::clearWidgets() {
 }
 
 void MainWindow::updateIsActive() {
-	_isActive = computeIsActive();
-	updateIsActiveHook();
+	const auto isActive = computeIsActive();
+	if (_isActive != isActive) {
+		_isActive = isActive;
+		activeChangedHook();
+	}
 }
 
 bool MainWindow::computeIsActive() const {
@@ -314,7 +316,9 @@ void MainWindow::handleStateChanged(Qt::WindowState state) {
 		controller().updateIsActiveFocus();
 	}
 	Core::App().updateNonIdle();
-	if (state == Qt::WindowMinimized && Global::WorkMode().value() == dbiwmTrayOnly) {
+	using WorkMode = Core::Settings::WorkMode;
+	if (state == Qt::WindowMinimized
+		&& (Core::App().settings().workMode() == WorkMode::TrayOnly)) {
 		minimizeToTray();
 	}
 	savePosition(state);
@@ -524,28 +528,30 @@ void MainWindow::initSize() {
 					if (position.w > w) position.w = w;
 					if (position.h > h) position.h = h;
 					const auto rightPoint = position.x + position.w;
-					if (rightPoint > w) {
-						const auto distance = rightPoint - w;
+					const auto screenRightPoint = x + w;
+					if (rightPoint > screenRightPoint) {
+						const auto distance = rightPoint - screenRightPoint;
 						const auto newXPos = position.x - distance;
-						if (newXPos >= 0) {
+						if (newXPos >= x) {
 							position.x = newXPos;
 						} else {
-							position.x = 0;
+							position.x = x;
 							const auto newRightPoint = position.x + position.w;
-							const auto newDistance = newRightPoint - w;
+							const auto newDistance = newRightPoint - screenRightPoint;
 							position.w -= newDistance;
 						}
 					}
 					const auto bottomPoint = position.y + position.h;
-					if (bottomPoint > h) {
-						const auto distance = bottomPoint - h;
+					const auto screenBottomPoint = y + h;
+					if (bottomPoint > screenBottomPoint) {
+						const auto distance = bottomPoint - screenBottomPoint;
 						const auto newYPos = position.y - distance;
-						if (newYPos >= 0) {
+						if (newYPos >= y) {
 							position.y = newYPos;
 						} else {
-							position.y = 0;
+							position.y = y;
 							const auto newBottomPoint = position.y + position.h;
-							const auto newDistance = newBottomPoint - h;
+							const auto newDistance = newBottomPoint - screenBottomPoint;
 							position.h -= newDistance;
 						}
 					}
@@ -779,7 +785,6 @@ void MainWindow::showRightColumn(object_ptr<TWidget> widget) {
 		setInnerFocus();
 	}
 	const auto nowRightWidth = _rightColumn ? _rightColumn->width() : 0;
-	const auto wasMaximized = isMaximized();
 	const auto wasMinimumWidth = minimumWidth();
 	const auto nowMinimumWidth = computeMinWidth();
 	const auto firstResize = (nowMinimumWidth < wasMinimumWidth);
@@ -827,17 +832,16 @@ int MainWindow::tryToExtendWidthBy(int addToWidth) {
 	return addToWidth;
 }
 
-void MainWindow::launchDrag(std::unique_ptr<QMimeData> data) {
-	auto weak = QPointer<MainWindow>(this);
+void MainWindow::launchDrag(
+		std::unique_ptr<QMimeData> data,
+		Fn<void()> &&callback) {
 	auto drag = std::make_unique<QDrag>(this);
 	drag->setMimeData(data.release());
 	drag->exec(Qt::CopyAction);
 
 	// We don't receive mouseReleaseEvent when drag is finished.
 	ClickHandler::unpressed();
-	if (weak) {
-		weak->dragFinished().notify();
-	}
+	callback();
 }
 
 MainWindow::~MainWindow() {

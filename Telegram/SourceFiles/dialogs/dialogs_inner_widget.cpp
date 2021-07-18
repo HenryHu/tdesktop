@@ -38,7 +38,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwidget.h"
 #include "storage/storage_account.h"
 #include "apiwrap.h"
-#include "window/themes/window_theme.h"
 #include "main/main_session.h"
 #include "main/main_session_settings.h"
 #include "window/notifications_manager.h"
@@ -126,9 +125,6 @@ InnerWidget::InnerWidget(
 
 	_cancelSearchInChat->setClickedCallback([=] { cancelSearchInChat(); });
 	_cancelSearchInChat->hide();
-	_cancelSearchFromUser->setClickedCallback([=] {
-		searchFromUserChanged.notify(nullptr);
-	});
 	_cancelSearchFromUser->hide();
 
 	session().downloaderTaskFinished(
@@ -136,13 +132,13 @@ InnerWidget::InnerWidget(
 		update();
 	}, lifetime());
 
-	subscribe(Core::App().notifications().settingsChanged(), [=](
-			Window::Notifications::ChangeType change) {
+	Core::App().notifications().settingsChanged(
+	) | rpl::start_with_next([=](Window::Notifications::ChangeType change) {
 		if (change == Window::Notifications::ChangeType::CountMessages) {
 			// Folder rows change their unread badge with this setting.
 			update();
 		}
-	});
+	}, lifetime());
 
 	session().data().contactsLoaded().changes(
 	) | rpl::start_with_next([=] {
@@ -700,10 +696,6 @@ void InnerWidget::paintCollapsedRow(
 		bool selected) const {
 	Expects(row->folder != nullptr);
 
-	const auto smallWidth = st::dialogsPadding.x()
-		+ st::dialogsPhotoSize
-		+ st::dialogsPhotoPadding;
-	const auto narrow = (width() <= smallWidth);
 	const auto text = row->folder->chatListName();
 	const auto unread = row->folder->chatListUnreadCount();
 	Layout::PaintCollapsedRow(
@@ -1957,6 +1949,10 @@ rpl::producer<> InnerWidget::listBottomReached() const {
 	return _listBottomReached.events();
 }
 
+rpl::producer<> InnerWidget::cancelSearchFromUserRequests() const {
+	return _cancelSearchFromUser->clicks() | rpl::to_empty;
+}
+
 void InnerWidget::visibleTopBottomUpdated(
 		int visibleTop,
 		int visibleBottom) {
@@ -2137,7 +2133,7 @@ void InnerWidget::peerSearchReceived(
 		} else {
 			LOG(("API Error: "
 				"user %1 was not loaded in InnerWidget::peopleReceived()"
-				).arg(peer->id.value));
+				).arg(peerFromMTP(mtpPeer).value));
 		}
 	}
 	for (const auto &mtpPeer : result) {
@@ -2152,7 +2148,7 @@ void InnerWidget::peerSearchReceived(
 		} else {
 			LOG(("API Error: "
 				"user %1 was not loaded in InnerWidget::peopleReceived()"
-				).arg(peer->id.value));
+				).arg(peerFromMTP(mtpPeer).value));
 		}
 	}
 	refresh();
@@ -2583,7 +2579,7 @@ void InnerWidget::loadPeerPhotos() {
 		int32 from = (yFrom - filteredOffset()) / st::dialogsRowHeight;
 		if (from < 0) from = 0;
 		if (from < _filterResults.size()) {
-			int32 to = (yTo / int32(st::dialogsRowHeight)) + 1, w = width();
+			int32 to = (yTo / int32(st::dialogsRowHeight)) + 1;
 			if (to > _filterResults.size()) to = _filterResults.size();
 
 			for (; from < to; ++from) {
@@ -2594,7 +2590,7 @@ void InnerWidget::loadPeerPhotos() {
 		from = (yFrom > filteredOffset() + st::searchedBarHeight ? ((yFrom - filteredOffset() - st::searchedBarHeight) / int32(st::dialogsRowHeight)) : 0) - _filterResults.size();
 		if (from < 0) from = 0;
 		if (from < _peerSearchResults.size()) {
-			int32 to = (yTo > filteredOffset() + st::searchedBarHeight ? ((yTo - filteredOffset() - st::searchedBarHeight) / int32(st::dialogsRowHeight)) : 0) - _filterResults.size() + 1, w = width();
+			int32 to = (yTo > filteredOffset() + st::searchedBarHeight ? ((yTo - filteredOffset() - st::searchedBarHeight) / int32(st::dialogsRowHeight)) : 0) - _filterResults.size() + 1;
 			if (to > _peerSearchResults.size()) to = _peerSearchResults.size();
 
 			for (; from < to; ++from) {
@@ -2604,7 +2600,7 @@ void InnerWidget::loadPeerPhotos() {
 		from = (yFrom > filteredOffset() + ((_peerSearchResults.empty() ? 0 : st::searchedBarHeight) + st::searchedBarHeight) ? ((yFrom - filteredOffset() - (_peerSearchResults.empty() ? 0 : st::searchedBarHeight) - st::searchedBarHeight) / int32(st::dialogsRowHeight)) : 0) - _filterResults.size() - _peerSearchResults.size();
 		if (from < 0) from = 0;
 		if (from < _searchResults.size()) {
-			int32 to = (yTo > filteredOffset() + (_peerSearchResults.empty() ? 0 : st::searchedBarHeight) + st::searchedBarHeight ? ((yTo - filteredOffset() - (_peerSearchResults.empty() ? 0 : st::searchedBarHeight) - st::searchedBarHeight) / int32(st::dialogsRowHeight)) : 0) - _filterResults.size() - _peerSearchResults.size() + 1, w = width();
+			int32 to = (yTo > filteredOffset() + (_peerSearchResults.empty() ? 0 : st::searchedBarHeight) + st::searchedBarHeight ? ((yTo - filteredOffset() - (_peerSearchResults.empty() ? 0 : st::searchedBarHeight) - st::searchedBarHeight) / int32(st::dialogsRowHeight)) : 0) - _filterResults.size() - _peerSearchResults.size() + 1;
 			if (to > _searchResults.size()) to = _searchResults.size();
 
 			for (; from < to; ++from) {
@@ -2679,7 +2675,6 @@ bool InnerWidget::chooseHashtag() {
 }
 
 ChosenRow InnerWidget::computeChosenRow() const {
-	auto msgId = ShowAtUnreadMsgId;
 	if (_state == WidgetState::Default) {
 		if (_selected) {
 			return {
@@ -2746,7 +2741,6 @@ RowDescriptor InnerWidget::chatListEntryBefore(
 	}
 
 	const auto whichHistory = which.key.history();
-	const auto whichFullId = which.fullId;
 	if (!whichHistory) {
 		return RowDescriptor();
 	}
@@ -2824,7 +2818,6 @@ RowDescriptor InnerWidget::chatListEntryAfter(
 	}
 
 	const auto whichHistory = which.key.history();
-	const auto whichFullId = which.fullId;
 	if (!whichHistory) {
 		return RowDescriptor();
 	}
@@ -3191,7 +3184,7 @@ void InnerWidget::setupShortcuts() {
 		});
 
 		request->check(Command::ShowContacts) && request->handle([=] {
-			Ui::show(PrepareContactsBox(_controller));
+			_controller->show(PrepareContactsBox(_controller));
 			return true;
 		});
 

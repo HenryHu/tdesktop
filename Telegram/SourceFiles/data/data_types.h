@@ -95,7 +95,7 @@ class PeerData;
 class UserData;
 class ChatData;
 class ChannelData;
-class BotCommand;
+struct BotCommand;
 struct BotInfo;
 
 namespace Data {
@@ -193,16 +193,6 @@ struct GameData;
 struct PollData;
 
 class AudioMsgId;
-class PhotoClickHandler;
-class PhotoOpenClickHandler;
-class PhotoSaveClickHandler;
-class PhotoCancelClickHandler;
-class DocumentClickHandler;
-class DocumentSaveClickHandler;
-class DocumentOpenClickHandler;
-class DocumentCancelClickHandler;
-class DocumentWrappedClickHandler;
-class VoiceSeekClickHandler;
 
 using PhotoId = uint64;
 using VideoId = uint64;
@@ -362,32 +352,15 @@ inline bool operator!=(
 	return !(a == b);
 }
 
-class FileClickHandler : public LeftButtonClickHandler {
-public:
-	FileClickHandler(
-		not_null<Main::Session*> session,
-		FullMsgId context)
-	: _session(session)
-	, _context(context) {
+struct StickerSetIdentifier {
+	uint64 id = 0;
+	uint64 accessHash = 0;
+	QString shortName;
+
+	[[nodiscard]] bool empty() const {
+		return !id && shortName.isEmpty();
 	}
-
-	[[nodiscard]] Main::Session &session() const {
-		return *_session;
+	[[nodiscard]] explicit operator bool() const {
+		return !empty();
 	}
-
-	void setMessageId(FullMsgId context) {
-		_context = context;
-	}
-
-	[[nodiscard]] FullMsgId context() const {
-		return _context;
-	}
-
-protected:
-	HistoryItem *getActionItem() const;
-
-private:
-	const not_null<Main::Session*> _session;
-	FullMsgId _context;
-
 };

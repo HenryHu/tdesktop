@@ -363,20 +363,10 @@ CurrencyRule LookupCurrencyRule(const QString &currency) {
 	return result;
 }
 
-QString ComposeNameString(
-		const QString &filename,
-		const QString &songTitle,
-		const QString &songPerformer) {
-	if (songTitle.isEmpty() && songPerformer.isEmpty()) {
-		return filename.isEmpty() ? u"Unknown File"_q : filename;
-	}
-
-	if (songPerformer.isEmpty()) {
-		return songTitle;
-	}
-
-	auto trackTitle = (songTitle.isEmpty() ? u"Unknown Track"_q : songTitle);
-	return songPerformer + QString::fromUtf8(" \xe2\x80\x93 ") + trackTitle;
+QString FormatImageSizeText(const QSize &size) {
+	return QString::number(size.width())
+		+ QChar(215)
+		+ QString::number(size.height());
 }
 
 } // namespace Ui
